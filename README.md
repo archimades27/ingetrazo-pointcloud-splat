@@ -3,18 +3,23 @@
 [![IngeTrazo](https://img.shields.io/badge/IngeTrazo-v0.5.7+-007ACC.svg)](https://ingetrazo.com)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/tag/v1.0.0)
+[![YouTube Preview](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000.svg?logo=youtube&logoColor=white)](https://youtu.be/XS2TN14EPjI)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-yellow.svg)]()
 [![Platform: macOS | Linux | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
 
 > **The definitive high-performance Point Cloud (LiDAR, Photogrammetry) and 3D Gaussian Splatting (3DGS) extension for [IngeTrazo](https://ingetrazo.com) CAD/BIM modeler.**
 
-![Point Cloud & Gaussian Splatting Preview](screenshots/pointcloud_splat.png)
+[![Watch Video Preview on YouTube](screenshots/youtube_thumbnail.png)](https://youtu.be/XS2TN14EPjI)
+
+*▶️ **Watch the live video demonstration on YouTube: [https://youtu.be/XS2TN14EPjI](https://youtu.be/XS2TN14EPjI)***
 
 ---
 
 ## 📖 Overview
 
 The **Point Cloud & 3D Gaussian Splatting** extension brings native, interactive reality-capture workflows directly inside **IngeTrazo**. It enables architects, engineers, surveyors, and 3D designers to import aerial drone scans, terrestrial LiDAR datasets, photogrammetry models, and volumetric radiance fields (*3D Gaussian Splats*), providing **sub-millisecond viewport rendering (up to 60+ FPS)**, architectural 3D section slicing, and **native CAD snapping** for precision as-built modeling and Scan-to-BIM reconstruction.
+
+![IngeTrazo Point Cloud & Gaussian Splatting UI](screenshots/pointcloud_splat.png)
 
 ---
 
