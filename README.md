@@ -12,86 +12,84 @@
 
 ---
 
-## 📖 Ringkasan (Overview)
+## 📖 Overview
 
-Ekstensi ini mengintegrasikan pemrosesan dan visualisasi data pemindaian 3D secara native ke dalam **IngeTrazo**. Anda dapat mengimpor file hasil pemindaian drone, pemindai LiDAR darat, model fotogrametri, dan model radiansi volumetrik modern (*3D Gaussian Splats*), lalu melakukan **CAD snapping** presisi tinggi untuk menggambar as-built drawings (*Scan-to-BIM*) dengan kecepatan hingga **60+ FPS**.
+The **Point Cloud & 3D Gaussian Splatting** extension brings native, interactive reality-capture workflows directly inside **IngeTrazo**. It enables architects, engineers, surveyors, and 3D designers to import aerial drone scans, terrestrial LiDAR datasets, photogrammetry models, and volumetric radiance fields (*3D Gaussian Splats*), providing **sub-millisecond viewport rendering (up to 60+ FPS)**, architectural 3D section slicing, and **native CAD snapping** for precision as-built modeling and Scan-to-BIM reconstruction.
 
 ---
 
-## 📊 Format Berkas yang Didukung (Supported Formats)
+## 📊 Supported File Formats
 
-| Format | Ekstensi | Deskripsi & Kemampuan |
+| Format | Extension | Capabilities & Details |
 | :--- | :--- | :--- |
-| **Polygon File Format** | `.ply` | ASCII & Binary Little-Endian. Mendukung point cloud standar (XYZ + RGB + Normal) dan model volumetrik **3D Gaussian Splatting** (Spherical Harmonics orde 0–3, skala kovarian, kuaternion rotasi). |
-| **LiDAR ASPRS** | `.las`, `.laz` | Standar industri LiDAR penerbangan dan terestrial (ASPRS LAS 1.1 – 1.4). Mendukung koordinat XYZ floating-point, warna RGB 16-bit/8-bit, dan intensitas reflektansi sensor. |
-| **Raw WebGL Splats** | `.splat` | Format terkompresi mentah 32-byte chunk (kompatibel dengan antimatter15, Luma, SuperSplat, Polycam, dan WebGL viewers). |
-| **ASCII Table / Points** | `.xyz`, `.pts`, `.txt`, `.csv` | Deteksi otomatis delimiter (koma, spasi, tab). Mengurai koordinat XYZ, RGB (0–255 atau 0.0–1.0), serta kolom intensitas. |
+| **Polygon File Format** | `.ply` | ASCII & Binary Little-Endian. Supports standard point clouds (XYZ + RGB + Normals) and full **3D Gaussian Splatting** datasets (Spherical Harmonics degrees 0–3, covariance scale factors, and rotation quaternions). |
+| **LiDAR ASPRS Standard** | `.las`, `.laz` | Industry-standard airborne and terrestrial LiDAR format (ASPRS LAS 1.1 through 1.4). Supports double-precision georeferenced coordinates, 8-bit/16-bit RGB channels, and sensor reflectance intensity. |
+| **Raw WebGL Splats** | `.splat` | Compact 32-byte chunk format commonly exported by modern photogrammetry pipelines and web viewers (antimatter15, Luma AI, Polycam, SuperSplat, KIRI Engine). |
+| **ASCII Table Formats** | `.xyz`, `.pts`, `.txt`, `.csv` | Automatic delimiter detection (comma, space, tab). Automatically extracts XYZ coordinates, RGB color channels (0–255 or 0.0–1.0 floats), and intensity values. |
 
 ---
 
-## 🌟 Fitur Utama & Kemampuan (Key Features)
+## 🌟 Key Features
 
-### 🚀 1. Engine Rendering Viewport Berkecepatan Tinggi (Up to 60+ FPS)
-* **Kernel Akselerasi C / GCD**: Dilengkapi modul C teroptimasi (`fast_splat.c`) dengan SIMD dan multithreading (Apple Grand Central Dispatch / parallel sorting) untuk proyeksi splat dan rasterisasi piksel sub-milidetik.
-* **Adaptive Dynamic LOD (Level of Detail)**: Mengatur kepadatan titik dan anggaran memori secara cerdas selama manipulasi viewport (orbit, pan, zoom) sehingga navigasi tetap halus tanpa jeda (lag), bahkan pada awan titik dengan puluhan juta koordinat.
-* **Dukungan MultiView / Quad Viewports**: Tersinkronisasi mulus pada tata letak multi-viewport IngeTrazo (Tampak Atas/Top, Tampak Depan/Front, Tampak Samping/Right, dan Perspektif/ISO).
+### ⚡ 1. High-Performance Viewport Engine (Up to 60+ FPS)
+* **Native C / SIMD Kernel**: Ships with an optimized C module (`fast_splat.c`) utilizing hardware acceleration and multi-threaded parallel depth-sorting (Apple Grand Central Dispatch / parallel bins) for instant splat projection and sub-millisecond rasterization.
+* **Adaptive Dynamic LOD (Level of Detail)**: Dynamically adjusts render density and point budgets during rapid viewport navigation (orbit, pan, zoom) so interaction remains fluid without stutter, even on datasets exceeding tens of millions of points.
+* **MultiView & Quad Viewport Integration**: Synchronizes rendering across all split viewports in IngeTrazo (Top Plan, Front Elevation, Right Elevation, and 3D Perspective/ISO).
 
-### 🎨 2. Ragam Skema Pewarnaan (Colormaps & Shaders)
-* **True Color (RGB / SH)**: Menampilkan warna alami asli dari kamera fotogrametri atau pemindai LiDAR.
-* **Elevation Colormaps**: Menghasilkan gradien warna topografi berdasarkan ketinggian sumbu Z (*Turbo, Viridis, Jet, Terrain*). Sangat ideal untuk analisis kontur tanah dan grading tapak.
-* **LiDAR Intensity**: Memvisualisasikan daya reflektansi permukaan material untuk membedakan jalan aspal, vegetasi, air, dan dinding bangunan.
-* **Surface Normals**: Menampilkan orientasi arah bidang permukaan titik dalam warna RGB vektor normal.
+### 🎨 2. Comprehensive Shading & Colormaps
+* **True Color (RGB / SH)**: Renders natural surface colors captured by cameras or photogrammetric drones, including view-dependent spherical harmonics.
+* **Elevation Colormaps**: Maps vertical height (Z-axis) into vibrant analytical gradients (**Turbo, Viridis, Jet, Terrain**)—ideal for site analysis, cut-and-fill grading, and topography visualization.
+* **LiDAR Intensity**: Visualizes surface reflectivity to clearly distinguish asphalt roads, building facades, vegetation, and water bodies.
+* **Surface Normals**: Colors points based on their normal vectors (RGB mapped to XYZ surface orientation).
 
-### ✂️ 3. 3D Section Box / Clipping Interaktif
-* Kotak potong 3D (*Section Box*) yang dapat disesuaikan secara dinamis menggunakan slider batas sumbu X, Y, Z.
-* Memotong awan titik secara instan untuk menampilkan irisan denah lantai (*floor plan slices*) atau potongan dinding/fasad (*elevation sections*).
+### ✂️ 3. Interactive 3D Section Box / Clipping
+* Real-time 3D clipping volume with independent Min/Max controls for the X, Y, and Z axes.
+* Slice through dense point clouds instantly to inspect internal structural framing, isolate floor plan levels, or generate cross-section profiles.
 
-### 🧲 4. Native CAD Snapping (Snap-to-Cloud)
-* Mengintegrasikan awan titik dengan alat-alat gambar bawaan IngeTrazo (**Line Tool, Tape Measure, Push/Pull**).
-* Kursor CAD akan otomatis mengunci (*snap*) ke titik awan terdekat (*Nearest Point* atau *Vertex Point*) dengan indikator visual kursor berwarna hijau.
-* Memungkinkan tracing denah dan penarikan garis as-built 3D langsung di atas model scan lapangan.
+### 🧲 4. Precision CAD Snapping (Snap-to-Cloud)
+* Seamlessly connects point cloud geometry to IngeTrazo's native drafting tools (**Line Tool, Tape Measure, Push/Pull**).
+* The cursor automatically snaps to the nearest cloud point with an interactive green snap circle, allowing users to trace as-built walls and measure true field dimensions without converting the point cloud into heavy meshes.
 
-### 🏛️ 5. Alat Scan-to-BIM Otomatis
-* **RANSAC Dominant Plane Extraction**: Algoritma RANSAC bawaan untuk mendeteksi bidang dominan (dinding, lantai, pelat atap) dari awan titik yang dipilih dan mengonversinya menjadi grup bidang CAD IngeTrazo.
-* **3D Oriented Bounding Box (OBB)**: Menghasilkan kotak batas volume 3D yang membungkus objek secara akurat.
-* **Convert to Guide Points**: Mengekspor titik-titik sampel kunci menjadi *Guide Points* (titik bantu konstruksi) native di model IngeTrazo.
+### 🏛️ 5. Automated Scan-to-BIM & Reverse Engineering
+* **RANSAC Dominant Plane Detection**: Automatically extracts structural planar surfaces (walls, floors, ceiling slabs) from raw point clouds and generates native IngeTrazo face groups.
+* **3D Oriented Bounding Box (OBB)**: Computes the tightest bounding volume enclosing a scan cluster.
+* **Convert to Guide Points**: Converts key cloud points into permanent IngeTrazo construction guide points.
 
-### 🧪 6. Sampel Prosedural Bawaan (Built-in Demos)
-* Jika Anda belum memiliki file scan, ekstensi ini menyediakan generator sampel langsung dari antarmuka:
-  - **🏛️ Classic Facade**: Fasad bangunan klasik dengan kolom dan bukaan jendela.
-  - **🌐 Geodesic Dome**: Struktur kubah parametrik 3D Gaussian Splatting.
-  - **⛰️ Mountain Terrain**: Model kontur topografi bergradasi elevasi Turbo.
+### 🧪 6. Built-in Procedural Synthetic Demos
+* Experiment immediately without downloading gigabyte-sized scan files using built-in procedural generators:
+  - **🏛️ Classic Facade**: Multi-story architectural facade with columns and window openings.
+  - **🌐 Geodesic Dome**: Parametric hemispherical dome structure rendered as 3D Gaussian Splats.
+  - **⛰️ Mountain Terrain**: Topographic terrain model colored with elevation colormaps.
 
 ---
 
-## 🖥️ Antarmuka & Panel Pengaturan (UI Overview)
+## 🖥️ User Interface Overview
 
-Panel **Point Clouds & Splats** terletak di side dock kanan IngeTrazo dan dibagi menjadi beberapa bagian rapi:
+The **Point Clouds & Splats** dock panel appears in IngeTrazo's right tray dock:
 
-| Seksi Panel | Fungsi & Kontrol |
+| Panel Section | Features & Controls |
 | :--- | :--- |
-| **Datasets Manager** | Menampilkan daftar file yang sedang aktif, tombol toggle mata (visibilitas), tombol fokus kamera, dan tombol hapus (*trash*). |
-| **Display & Shading** | Pilihan mode warna (*RGB, Turbo, Viridis, Jet, Terrain, Intensity, Normals*), ukuran titik (*Point Size*: 1–12 px), dan tingkat transparansi (*Opacity*). |
-| **3D Transform & Gizmo** | Menggeser (*Offset X, Y, Z*), memutar (*Rotation Yaw/Pitch/Roll*), dan mengubah skala (*Scale Factor*) model scan agar tepat sejajar dengan sumbu proyek. |
-| **3D Section Box** | Mengaktifkan kotak pembatas potongan 3D dengan batas Min/Max X, Y, Z untuk inspeksi internal struktur. |
-| **CAD Snapping** | Mengaktifkan/menonaktifkan snap kursor serta mengatur radius toleransi penangkapan titik (10–50 px). |
-| **Scan-to-BIM Tools** | Tombol eksekusi RANSAC Plane Detection, Bounding Box, dan Guide Points. |
+| **Datasets Manager** | Lists active scans, toggle visibility (eye icon), camera focus (center on dataset), opacity slider, and dataset removal. |
+| **Display & Shading** | Choose shading mode (*RGB, Turbo, Viridis, Jet, Terrain, Intensity, Normals*), adjust point size (1–12 px), and configure splat scale. |
+| **3D Transform & Gizmo** | Adjust Position Offset (X, Y, Z), Rotation Angles (Yaw, Pitch, Roll), and Uniform Scale Factor to align scans with CAD geometry. |
+| **3D Section Box** | Toggle section box slicing and interactively adjust XYZ bounding bounds. |
+| **CAD Snapping** | Enable/disable snap-to-cloud and adjust screen pixel search tolerance (10–50 px). |
+| **Scan-to-BIM Tools** | One-click RANSAC Plane Extraction, 3D Bounding Box generation, and Guide Points creation. |
 
 ---
 
-## 🚀 Panduan Pemasangan (Installation)
+## 🚀 Installation
 
-### Metode 1: Melalui Katalog Resmi IngeTrazo (Rekomendasi)
-1. Buka katalog web resmi di [ingetrazo.com/extensiones](https://ingetrazo.com/extensiones).
-2. Temukan **Point Cloud & 3D Gaussian Splatting**, lalu klik **Download**.
-3. Ekstrak file zip yang diunduh sehingga menghasilkan folder `pointcloud_splat`.
-4. Di dalam IngeTrazo, buka menu:
-   **Extensiones ▸ Abrir carpeta de plugins** *(atau Extensions ▸ Open plugins folder)*.
-5. Salin folder `pointcloud_splat` ke direktori plugin tersebut.
-6. Mulai ulang (*restart*) IngeTrazo.
+### Method 1: Official IngeTrazo Extensions Catalog (Recommended)
+1. Visit the official catalog at [ingetrazo.com/extensiones](https://ingetrazo.com/extensiones).
+2. Locate **Point Cloud & 3D Gaussian Splatting** and click **Download**.
+3. Extract the downloaded archive to obtain the `pointcloud_splat` folder.
+4. In IngeTrazo, go to **Extensions ▸ Open plugins folder** (*Extensiones ▸ Abrir carpeta de plugins*).
+5. Copy the `pointcloud_splat` folder into that directory.
+6. Restart IngeTrazo.
 
-### Metode 2: Pemasangan Manual dari Repositori Ini
-Salin folder `pointcloud_splat` ke direktori plugin sesuai sistem operasi Anda:
+### Method 2: Manual Installation from this Repository
+Clone or copy the `pointcloud_splat` folder directly into your platform's IngeTrazo plugin directory:
 
 * **macOS**:
   ```bash
@@ -102,41 +100,41 @@ Salin folder `pointcloud_splat` ke direktori plugin sesuai sistem operasi Anda:
   cp -r pointcloud_splat/ "$HOME/.local/share/ingetrazo/plugins/"
   ```
 * **Windows**:
-  Salin folder `pointcloud_splat` ke direktori `%APPDATA%\IngeTrazo\plugins\`.
+  Copy the `pointcloud_splat` folder into `%APPDATA%\IngeTrazo\plugins\`.
 
 ---
 
-## 🎯 Panduan Penggunaan Singkat
+## 🎯 Quick Start Workflow
 
-1. Buka aplikasi **IngeTrazo**.
-2. Buka menu **Extensions > Point Cloud & Gaussian Splatting…** atau tekan tombol pintas **`Ctrl+Shift+P`**.
-3. Panel samping akan terbuka otomatis.
-4. **Cara Impor File**:
-   * Klik tombol **Import File...** lalu pilih berkas scan Anda, atau
-   * Cukup **seret dan lepas (*drag & drop*)** file `.ply`, `.las`, `.splat`, atau `.xyz` langsung ke area gambar viewport 3D.
-5. Gunakan tombol **Line Tool** bawaan IngeTrazo untuk mulai menggambar denah atau dinding mengikuti titik-titik hasil scan.
+1. Launch **IngeTrazo**.
+2. Open the menu: **Extensions > Point Cloud & Gaussian Splatting…** or press **`Ctrl+Shift+P`**.
+3. **Import a file**:
+   * Click **Import File...** in the panel, OR
+   * **Drag and drop** any `.ply`, `.las`, `.laz`, `.splat`, or `.xyz` file directly into the 3D viewport.
+4. Select your preferred colormap (e.g., **Elevation - Turbo** for topography or **True Color RGB** for photogrammetry).
+5. Select the native **Line Tool** or **Tape Measure** and start modeling directly over the scan with snapping enabled!
 
 ---
 
-## 📦 Pembangunan Paket Distribusi (Building the Package)
+## 📦 Building Distribution Packages
 
-Jika Anda ingin memodifikasi kode atau membangun ulang arsip distribusi `.zip`:
+To package the extension for distribution or verify checksums:
 ```bash
 python3 tools/build_package.py
 ```
-Skrip ini akan:
-1. Membersihkan berkas sementara (`.DS_Store`, `__pycache__`).
-2. Mengemas direktori `pointcloud_splat/` ke dalam file distribusi `dist/pointcloud_splat.zip`.
-3. Menghitung nilai hash SHA-256 berkas zip secara otomatis.
-4. Memperbarui checksum pada berkas katalog `pointcloud_splat.toml`.
+This utility:
+1. Filters development artifacts (`.DS_Store`, `__pycache__`).
+2. Bundles the root `pointcloud_splat/` folder into `dist/pointcloud_splat.zip`.
+3. Calculates the SHA-256 cryptographic digest.
+4. Synchronizes the hash into `pointcloud_splat.toml`.
 
 ---
 
-## 📄 Lisensi (License)
+## 📄 License
 
-Proyek ini merupakan perangkat lunak bebas yang dilisensikan di bawah **[GNU General Public License v3.0 (GPL-3.0-or-later)](LICENSE)**.
+This project is free software licensed under the **[GNU General Public License v3.0 (GPL-3.0-or-later)](LICENSE)**.
 
 ```text
 Copyright (C) 2026 Archimades (archimades27) and IngeTrazo contributors.
 ```
-Anda bebas menggunakan, memodifikasi, dan mendistribusikan perangkat lunak ini sesuai ketentuan GPLv3.
+You are free to use, inspect, modify, and redistribute this software under the terms of the GNU GPLv3 license.
