@@ -149,6 +149,42 @@ def setup(app) -> None:
                 return None
             Viewport._extension_snap = _wrapped_extension_snap
 
+        if not hasattr(Viewport, "_orig_annotations_need_depth_pcsplat"):
+            Viewport._orig_annotations_need_depth_pcsplat = Viewport._annotations_need_depth
+            def _wrapped_annotations_need_depth(self):
+                if Viewport._orig_annotations_need_depth_pcsplat(self):
+                    return True
+                try:
+                    style = self._effective_style()
+                    if getattr(style, "face_mode", "") in ("xray", "wireframe"):
+                        return False
+                    p = panel if panel else getattr(getattr(self, "window", lambda: None)(), "_pointcloud_panel", None)
+                    if p and any(d.visible and len(d.coords) > 0 for d in getattr(p, "datasets", ())):
+                        return True
+                except Exception:
+                    pass
+                return False
+            Viewport._annotations_need_depth = _wrapped_annotations_need_depth
+
+        if not hasattr(Viewport, "_orig_pick_group_pcsplat"):
+            Viewport._orig_pick_group_pcsplat = Viewport.pick_group
+            def _wrapped_pick_group(self, screen_x, screen_y):
+                grp = Viewport._orig_pick_group_pcsplat(self, screen_x, screen_y)
+                if grp is not None:
+                    return grp
+                try:
+                    se = getattr(app, "_cloud_snap_engine", snap_engine)
+                    p = panel if panel else getattr(getattr(self, "window", lambda: None)(), "_pointcloud_panel", None)
+                    if se and p and p.datasets:
+                        hit = se.find_nearest_point(self, float(screen_x), float(screen_y), p.datasets)
+                        if hit is not None:
+                            _, ds = hit
+                            return getattr(ds, "proxy_group", None)
+                except Exception:
+                    pass
+                return None
+            Viewport.pick_group = _wrapped_pick_group
+
         # Ensure switching to standard views (Top, Front, Right, etc.) frames point clouds
         import math
         from PySide6.QtGui import QVector3D

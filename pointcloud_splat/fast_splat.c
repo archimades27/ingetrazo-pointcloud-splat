@@ -23,7 +23,7 @@ static inline float fast_exp(float x) {
 }
 
 typedef struct {
-    float px, py;
+    float px, py, z;
     float A, B, C;
     int min_x, max_x, min_y, max_y;
     uint8_t r, g, b;
@@ -181,7 +181,8 @@ void rasterize_splats_direct(
     float cy,
     float splat_scale,
     float opacity_mul,
-    const float *clip_plane     // Optional section cut plane [nx, ny, nz, d] or NULL
+    const float *clip_plane,    // Optional section cut plane [nx, ny, nz, d] or NULL
+    const float *scene_depth    // Optional linear eye-space scene depth [height * width] or NULL
 ) {
     if (!buf || width <= 0 || height <= 0 || n_draw <= 0) return;
 
@@ -380,6 +381,7 @@ void rasterize_splats_direct(
 
             splats[k].px = p_x;
             splats[k].py = p_y;
+            splats[k].z = z;
             splats[k].A = A_conic;
             splats[k].B = B_conic;
             splats[k].C = C_conic;
@@ -456,6 +458,7 @@ void rasterize_splats_direct(
                 int max_x = splats[idx].max_x;
                 float p_x = splats[idx].px;
                 float p_y = splats[idx].py;
+                float splat_z = splats[idx].z;
                 float A_conic = splats[idx].A;
                 float B_conic = splats[idx].B;
                 float C_conic = splats[idx].C;
@@ -469,8 +472,10 @@ void rasterize_splats_direct(
                     float C_dy = C_conic * dy * dy;
                     float two_B_dy = 2.0f * B_conic * dy;
                     uint8_t *row = &buf[(y * width + min_x) * 4];
+                    const float *depth_row = scene_depth ? &scene_depth[y * width] : NULL;
 
                     for (int x = min_x; x <= max_x; x++, row += 4) {
+                        if (depth_row && splat_z > depth_row[x]) continue;
                         float dx = (float)x - p_x;
                         float power = -0.5f * (A_conic * dx * dx + two_B_dy * dx + C_dy);
                         if (power > 0.0f || power < -4.5f) continue;
@@ -517,7 +522,8 @@ int rasterize_splats_auto(
     float fx, float fy, float cx, float cy,
     float splat_scale, float opacity_mul,
     int clear_buf,
-    const float *clip_plane
+    const float *clip_plane,
+    const float *scene_depth
 ) {
     if (!buf || width <= 0 || height <= 0 || n_total <= 0) return 0;
 
@@ -543,7 +549,7 @@ int rasterize_splats_auto(
             coords, scales, rotations, colors,
             obj_mat, view_mat, cam_eye,
             fx, fy, cx, cy, splat_scale, opacity_mul,
-            clip_plane
+            clip_plane, scene_depth
         );
     }
 
@@ -566,7 +572,8 @@ void rasterize_point_cloud_auto(
     float opacity_mul,
     int clear_buf,
     int is_ortho,
-    const float *clip_plane
+    const float *clip_plane,
+    float *scene_depth
 ) {
     if (!buf || width <= 0 || height <= 0 || n_points <= 0) return;
 
@@ -577,8 +584,36 @@ void rasterize_point_cloud_auto(
     size_t n_pixels = (size_t)width * height;
     uint32_t *depth_buf = (uint32_t *)malloc(n_pixels * sizeof(uint32_t));
     if (!depth_buf) return;
-    for (size_t i = 0; i < n_pixels; i++) {
-        depth_buf[i] = 0x7FFFFFFF;
+    if (scene_depth) {
+        if (is_ortho) {
+            for (size_t i = 0; i < n_pixels; i++) {
+                float sz = scene_depth[i];
+                if (sz >= 1e8f) {
+                    depth_buf[i] = 0x7FFFFFFF;
+                } else {
+                    float d_val = (sz + 50000.0f) * 1000.0f;
+                    if (d_val < 0.0f) d_val = 0.0f;
+                    if (d_val > 2147483647.0f) d_val = 2147483647.0f;
+                    depth_buf[i] = (uint32_t)d_val;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < n_pixels; i++) {
+                float sz = scene_depth[i];
+                if (sz >= 1e8f) {
+                    depth_buf[i] = 0x7FFFFFFF;
+                } else {
+                    float d_val = sz * 1000.0f;
+                    if (d_val < 0.0f) d_val = 0.0f;
+                    if (d_val > 2147483647.0f) d_val = 2147483647.0f;
+                    depth_buf[i] = (uint32_t)d_val;
+                }
+            }
+        }
+    } else {
+        for (size_t i = 0; i < n_pixels; i++) {
+            depth_buf[i] = 0x7FFFFFFF;
+        }
     }
 
     uint32_t *cbuf32 = (uint32_t *)buf;
@@ -710,6 +745,22 @@ void rasterize_point_cloud_auto(
             }
         }
     PARALLEL_FOR_END()
+
+    if (scene_depth) {
+        if (is_ortho) {
+            for (size_t i = 0; i < n_pixels; i++) {
+                if (depth_buf[i] < 0x7FFFFFFF) {
+                    scene_depth[i] = ((float)depth_buf[i] * 0.001f) - 50000.0f;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < n_pixels; i++) {
+                if (depth_buf[i] < 0x7FFFFFFF) {
+                    scene_depth[i] = (float)depth_buf[i] * 0.001f;
+                }
+            }
+        }
+    }
 
     free(depth_buf);
 }

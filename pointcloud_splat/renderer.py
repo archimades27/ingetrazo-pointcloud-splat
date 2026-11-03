@@ -86,7 +86,8 @@ def _get_fast_splat_lib():
                     ctypes.c_float, ctypes.c_float,                    # cx, cy
                     ctypes.c_float, ctypes.c_float,                    # splat_scale, opacity_mul
                     ctypes.c_int,                                      # clear_buf
-                    ctypes.POINTER(ctypes.c_float)                     # clip_plane
+                    ctypes.POINTER(ctypes.c_float),                    # clip_plane
+                    ctypes.POINTER(ctypes.c_float)                     # scene_depth
                 ]
                 lib.rasterize_splats_auto.restype = ctypes.c_int
 
@@ -117,7 +118,8 @@ def _get_fast_splat_lib():
                     ctypes.c_float, ctypes.c_float,                    # fx, fy
                     ctypes.c_float, ctypes.c_float,                    # cx, cy
                     ctypes.c_float, ctypes.c_float,                    # splat_scale, opacity_mul
-                    ctypes.POINTER(ctypes.c_float)                     # clip_plane
+                    ctypes.POINTER(ctypes.c_float),                    # clip_plane
+                    ctypes.POINTER(ctypes.c_float)                     # scene_depth
                 ]
             if hasattr(lib, "rasterize_points"):
                 lib.rasterize_points.argtypes = [
@@ -144,7 +146,8 @@ def _get_fast_splat_lib():
                     ctypes.c_float,                                    # opacity_mul
                     ctypes.c_int,                                      # clear_buf
                     ctypes.c_int,                                      # is_ortho
-                    ctypes.POINTER(ctypes.c_float)                     # clip_plane
+                    ctypes.POINTER(ctypes.c_float),                    # clip_plane
+                    ctypes.POINTER(ctypes.c_float)                     # scene_depth
                 ]
                 lib.rasterize_point_cloud_auto.restype = None
             _fast_splat_lib = lib
@@ -290,8 +293,76 @@ class CloudRenderer:
         d = float(-(nx * pt.x() + ny * pt.y() + nz * pt.z()))
         return np.array([nx, ny, nz, d], dtype=np.float32)
 
+    def _get_scene_depth(self, viewport, w: int, h: int) -> Optional[np.ndarray]:
+        """Extract linear eye-space depth buffer (float32[h, w]) of the 3D CAD scene."""
+        try:
+            style = viewport._effective_style() if hasattr(viewport, "_effective_style") else None
+            if style is not None and getattr(style, "face_mode", "") in ("xray", "wireframe"):
+                return None
+
+            cam = getattr(viewport, "camera", None)
+            if cam is None:
+                return None
+
+            snap = getattr(viewport, "_depth_snap", None)
+            if snap is None and getattr(viewport, "_scene_fbo", None) is not None and getattr(viewport, "_export_size", None) is None:
+                try:
+                    viewport.makeCurrent()
+                    try:
+                        viewport._capture_depth(viewport._scene_fbo.width(), viewport._scene_fbo.height())
+                    finally:
+                        viewport.doneCurrent()
+                    snap = getattr(viewport, "_depth_snap", None)
+                except Exception:
+                    snap = None
+
+            if snap is None or len(snap) < 1 or snap[0] is None:
+                return None
+
+            buf = snap[0]
+            if buf.size == 0:
+                return None
+
+            # Flip vertically (glReadPixels row 0 is bottom of screen; QImage row 0 is top)
+            d_top = buf[::-1, :]
+            if d_top.shape != (h, w):
+                iy = (np.arange(h) * (d_top.shape[0] / h)).astype(np.intp)
+                ix = (np.arange(w) * (d_top.shape[1] / w)).astype(np.intp)
+                d_top = d_top[np.ix_(iy, ix)]
+
+            pm = cam.projection_matrix()
+            P22 = float(pm(2, 2))
+            P23 = float(pm(2, 3))
+            P32 = float(pm(3, 2))
+
+            ndc_z = d_top.astype(np.float32) * 2.0 - 1.0
+            sky_mask = d_top >= 0.999999
+
+            if abs(P32) > 0.1:
+                # Perspective projection: ndc_z = -P22 + P23 / z  =>  z = P23 / (ndc_z + P22)
+                denom = ndc_z + P22
+                valid = (~sky_mask) & (np.abs(denom) > 1e-7)
+                z_scene = np.full((h, w), 1e9, dtype=np.float32)
+                z_scene[valid] = P23 / denom[valid]
+                z_scene[z_scene <= 0.0] = 1e9
+            else:
+                # Orthographic projection: ndc_z = -P22 * z + P23  =>  z = (P23 - ndc_z) / P22
+                z_scene = np.full((h, w), 1e9, dtype=np.float32)
+                if abs(P22) > 1e-9:
+                    valid = ~sky_mask
+                    z_scene[valid] = (P23 - ndc_z[valid]) / P22
+
+            # Compensate for OpenGL glPolygonOffset(1.0, 1.0) on CAD faces so coplanar points
+            # do not bleed through modeled surfaces, while points in front remain visible.
+            fg = z_scene < 1e8
+            z_scene[fg] = z_scene[fg] * 0.9985 - 0.005
+            return np.ascontiguousarray(z_scene, dtype=np.float32)
+        except Exception as e:
+            log.debug(f"Scene depth extraction failed: {e}")
+            return None
+
     def get_view_hash(self, viewport, datasets, w: Optional[int] = None, h: Optional[int] = None) -> int:
-        """Hash camera, projection mode, section plane, and dataset display parameters."""
+        """Hash camera, projection mode, section plane, CAD scene version, and dataset display parameters."""
         cam = getattr(viewport, 'camera', None)
         if cam is None:
             return 0
@@ -328,6 +399,12 @@ class CloudRenderer:
 
         vw = w if w is not None else viewport.width()
         vh = h if h is not None else viewport.height()
+        scene = getattr(viewport, 'scene', None)
+        scene_ver = (
+            getattr(viewport, '_edges_version', 0),
+            len(getattr(scene, 'groups', ())),
+            getattr(viewport._effective_style(), 'face_mode', '') if hasattr(viewport, '_effective_style') else '',
+        )
 
         return hash((
             round(getattr(cam, 'yaw', 0.0), 3),
@@ -340,6 +417,7 @@ class CloudRenderer:
             self.max_point_budget,
             vw,
             vh,
+            scene_ver,
             tuple(ds_tokens)
         ))
 
@@ -418,6 +496,9 @@ class CloudRenderer:
             state.last_draft_qimg = None
             return
 
+        # Render opaque point clouds before semi-transparent Gaussian splats for accurate depth compositing
+        visible_ds.sort(key=lambda d: 1 if (type(d).__name__ == "GaussianSplatDataset" or isinstance(d, GaussianSplatDataset)) else 0)
+
         dev = painter.device()
         w = dev.width() if dev is not None else viewport.width()
         h = dev.height() if dev is not None else viewport.height()
@@ -449,18 +530,21 @@ class CloudRenderer:
             state.last_draft_qimg = None
             state.last_draft_hash = view_hash
 
+        scene_depth = self._get_scene_depth(viewport, w, h)
+
         # 2. Stationary state without final cache: display draft & dispatch background refine
         if not is_moving:
             if state.last_draft_qimg is None:
                 # Generate initial draft preview immediately (~15ms)
                 buf = np.zeros((h, w, 4), dtype=np.uint8)
+                draft_depth = scene_depth.copy() if scene_depth is not None else None
                 rendered_any = False
                 for ds in visible_ds:
                     ds_type = type(ds).__name__
                     if ds_type == "PointCloudDataset" or isinstance(ds, PointCloudDataset):
-                        rendered = self._render_point_cloud(ds, viewport, buf, w, h, is_moving=True)
+                        rendered = self._render_point_cloud(ds, viewport, buf, w, h, is_moving=True, scene_depth=draft_depth)
                     elif ds_type == "GaussianSplatDataset" or isinstance(ds, GaussianSplatDataset):
-                        rendered = self._render_gaussian_splat(ds, viewport, buf, w, h, is_moving=True)
+                        rendered = self._render_gaussian_splat(ds, viewport, buf, w, h, is_moving=True, scene_depth=draft_depth)
                     else:
                         rendered = False
                     rendered_any = rendered_any or rendered
@@ -477,21 +561,22 @@ class CloudRenderer:
 
             if state.refining_hash != view_hash:
                 state.refining_hash = view_hash
-                self._submit_background_refine(viewport, visible_ds, view_hash, w, h)
+                self._submit_background_refine(viewport, visible_ds, view_hash, w, h, scene_depth=scene_depth)
 
             self._render_selection_bounds(viewport, painter, visible_ds)
             return
 
         # 3. Interactive moving mode: render fast draft preview (~15ms)
         buf = np.zeros((h, w, 4), dtype=np.uint8)
+        draft_depth = scene_depth.copy() if scene_depth is not None else None
         rendered_any = False
 
         for ds in visible_ds:
             ds_type = type(ds).__name__
             if ds_type == "PointCloudDataset" or isinstance(ds, PointCloudDataset):
-                rendered = self._render_point_cloud(ds, viewport, buf, w, h, is_moving=True)
+                rendered = self._render_point_cloud(ds, viewport, buf, w, h, is_moving=True, scene_depth=draft_depth)
             elif ds_type == "GaussianSplatDataset" or isinstance(ds, GaussianSplatDataset):
-                rendered = self._render_gaussian_splat(ds, viewport, buf, w, h, is_moving=True)
+                rendered = self._render_gaussian_splat(ds, viewport, buf, w, h, is_moving=True, scene_depth=draft_depth)
             else:
                 rendered = False
             rendered_any = rendered_any or rendered
@@ -513,7 +598,8 @@ class CloudRenderer:
         visible_ds: List[Union[PointCloudDataset, GaussianSplatDataset]],
         view_hash: int,
         w: int,
-        h: int
+        h: int,
+        scene_depth: Optional[np.ndarray] = None
     ) -> None:
         """Launch high-resolution final pass in a background thread."""
         cam = getattr(viewport, 'camera', None)
@@ -550,6 +636,7 @@ class CloudRenderer:
             return
 
         clip_box = (self.clip_min.copy(), self.clip_max.copy()) if self.clipping_enabled else None
+        bg_scene_depth = scene_depth.copy() if scene_depth is not None else None
 
         # Snapshot datasets
         snapshots = []
@@ -593,6 +680,7 @@ class CloudRenderer:
 
             fast_lib = _get_fast_splat_lib()
             clip_p_c = clip_p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if clip_p is not None else None
+            depth_c = bg_scene_depth.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if bg_scene_depth is not None else None
             buf = np.zeros((h, w, 4), dtype=np.uint8)
 
             rendered_any = False
@@ -612,7 +700,8 @@ class CloudRenderer:
                         fx, fy, cx, cy,
                         s["splat_scale"], s["opacity"],
                         0,
-                        clip_p_c
+                        clip_p_c,
+                        depth_c
                     )
                     if n_drawn > 0:
                         rendered_any = True
@@ -644,7 +733,8 @@ class CloudRenderer:
                             s["point_size"], s["opacity"],
                             0,
                             is_ortho,
-                            clip_p_c
+                            clip_p_c,
+                            depth_c
                         )
                         rendered_any = True
 
@@ -792,7 +882,8 @@ class CloudRenderer:
         buf: np.ndarray,
         w: int,
         h: int,
-        is_moving: bool
+        is_moving: bool,
+        scene_depth: Optional[np.ndarray] = None
     ) -> bool:
         """Render a GaussianSplatDataset with direct zero-copy multithreaded rasterization."""
         pts = ds.coords
@@ -843,6 +934,7 @@ class CloudRenderer:
 
         clip_p = self._get_section_clip_plane(viewport)
         clip_p_c = clip_p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if clip_p is not None else None
+        depth_c = scene_depth.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if scene_depth is not None else None
 
         if fast_lib and hasattr(fast_lib, "rasterize_splats_auto"):
             n_drawn = fast_lib.rasterize_splats_auto(
@@ -858,7 +950,8 @@ class CloudRenderer:
                 fx, fy, cx, cy,
                 float(ds.splat_scale), float(ds.opacity),
                 0,
-                clip_p_c
+                clip_p_c,
+                depth_c
             )
             return n_drawn > 0
 
@@ -893,12 +986,13 @@ class CloudRenderer:
                 fx, fy, cx, cy,
                 float(ds.splat_scale),
                 float(ds.opacity),
-                clip_p_c
+                clip_p_c,
+                depth_c
             )
             return True
         else:
             return self._render_gaussian_splat_fallback(
-                buf, w, h, ds, order, eye_v, W, fx, fy, cx, cy
+                buf, w, h, ds, order, eye_v, W, fx, fy, cx, cy, scene_depth=scene_depth
             )
 
     def _render_gaussian_splat_fallback(
@@ -913,7 +1007,8 @@ class CloudRenderer:
         fx: float,
         fy: float,
         cx: float,
-        cy: float
+        cy: float,
+        scene_depth: Optional[np.ndarray] = None
     ) -> bool:
         """High-speed Python fallback with perspective scaling and alpha blending."""
         # Cap fallback to 100k splats for responsiveness
@@ -927,13 +1022,14 @@ class CloudRenderer:
         if not np.any(valid):
             return False
 
-        px = fx * (cam_pts[valid, 0] / z[valid]) + cx
-        py = -fy * (cam_pts[valid, 1] / z[valid]) + cy
+        z_val = z[valid]
+        px = fx * (cam_pts[valid, 0] / z_val) + cx
+        py = -fy * (cam_pts[valid, 1] / z_val) + cy
 
         scales = ds.scales[order][valid]
         colors = ds.colors[order][valid]
         mean_scale = np.mean(scales, axis=1) * ds.splat_scale
-        radii = np.clip((fx * mean_scale / np.maximum(0.1, z[valid])) * 1.5, 1.0, 32.0).astype(np.int32)
+        radii = np.clip((fx * mean_scale / np.maximum(0.1, z_val)) * 1.5, 1.0, 32.0).astype(np.int32)
 
         n_pts = len(px)
         ipx = px.astype(np.int32)
@@ -946,6 +1042,7 @@ class CloudRenderer:
             if x_c < -r or x_c >= w + r or y_c < -r or y_c >= h + r:
                 continue
 
+            splat_z = float(z_val[i])
             col = colors[i]
             base_alpha = (col[3] / 255.0) * opacity_mul
             if base_alpha < 0.01:
@@ -966,6 +1063,8 @@ class CloudRenderer:
                 dy = y - y_c
                 dy_sq = dy * dy
                 for x in range(x0, x1 + 1):
+                    if scene_depth is not None and splat_z > scene_depth[y, x]:
+                        continue
                     dx = x - x_c
                     d_sq = dx * dx + dy_sq
                     if d_sq <= r_sq:
@@ -1091,7 +1190,8 @@ class CloudRenderer:
         buf: np.ndarray,
         w: int,
         h: int,
-        is_moving: bool
+        is_moving: bool,
+        scene_depth: Optional[np.ndarray] = None
     ) -> bool:
         """Render a PointCloudDataset into buf."""
         n_pts = len(ds.coords)
@@ -1143,6 +1243,7 @@ class CloudRenderer:
         if fast_lib and hasattr(fast_lib, "rasterize_point_cloud_auto"):
             pt_size = max(1, min(14, int(ds.point_size)))
             clip_p_c = clip_p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if clip_p is not None else None
+            depth_c = scene_depth.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if scene_depth is not None else None
             fast_lib.rasterize_point_cloud_auto(
                 buf.ctypes.data,
                 w, h, len(sub_coords),
@@ -1156,7 +1257,8 @@ class CloudRenderer:
                 float(ds.opacity),
                 0,
                 is_ortho,
-                clip_p_c
+                clip_p_c,
+                depth_c
             )
             return True
 
@@ -1189,6 +1291,15 @@ class CloudRenderer:
         valid_px = px[valid].astype(np.int32)
         valid_py = py[valid].astype(np.int32)
         valid_colors = sub_colors[valid]
+        if scene_depth is not None:
+            W_mat = W_flat.reshape(3, 3)
+            z_pts = -((world_pts[valid] - eye_v) @ W_mat[2])
+            vis_mask = z_pts <= scene_depth[valid_py, valid_px]
+            if not np.any(vis_mask):
+                return False
+            valid_px = valid_px[vis_mask]
+            valid_py = valid_py[vis_mask]
+            valid_colors = valid_colors[vis_mask]
 
         bgra = np.empty_like(valid_colors)
         bgra[:, 0] = valid_colors[:, 2]  # B

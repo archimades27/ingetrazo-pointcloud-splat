@@ -66,17 +66,17 @@ def create_pointcloud_proxy(dataset, scene) -> Group:
     c = [QVector3D(float(pt[0]), float(pt[1]), float(pt[2])) for pt in raw_corners]
 
     m = Mesh()
-    # 6 faces with transparent material so points inside are completely visible,
-    # but ray-picking (pick_group) instantly hits any click over the point cloud volume.
-    # Preserve exact vertex order c0..c7:
-    m.add_face([c[0], c[1], c[2], c[3]])  # Bottom: v0..v3
-    m.add_face([c[4], c[5], c[6], c[7]])  # Top:    v4..v7
-    m.add_face([c[0], c[1], c[5], c[4]])  # Front
-    m.add_face([c[2], c[3], c[7], c[6]])  # Back
-    m.add_face([c[3], c[0], c[4], c[7]])  # Left
-    m.add_face([c[1], c[2], c[6], c[5]])  # Right
+    # Use 12 hidden edges (0 faces) so the proxy group never blocks mouse picking,
+    # face hover, Push/Pull, or CAD drawing inside the point cloud volume.
+    # Edge insertion order preserves exact vertex order c[0]..c[7] in m.vertices[:8].
+    for i, j in [
+        (0, 1), (2, 3), (4, 5), (6, 7),
+        (1, 2), (3, 0), (5, 6), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]:
+        m.add_edge(c[i], c[j])
 
-    # Hide default OpenGL black wireframe edges so only the point cloud and custom selection outline show
+    # Hide default OpenGL wireframe edges so only the point cloud and custom selection outline show
     for e in m.edges:
         e.hidden = True
     m._chunk_dirty = True

@@ -103,25 +103,24 @@ class CloudSnapEngine:
             ))
         return tuple(tok)
 
-    def snap(
+    def find_nearest_point(
         self,
         viewport,
-        snap: Optional[SnapResult],
-        px: int,
-        py: int,
-        datasets: List[Union[PointCloudDataset, GaussianSplatDataset]]
-    ) -> Optional[SnapResult]:
-        """Check if (px, py) is near any point cloud point; return SnapResult if so."""
-        if not self.enabled:
-            return None
-
-        # Only snap to discrete LiDAR / point clouds, not continuous 3D Gaussian Splats
-        visible_pc = [
+        px: float,
+        py: float,
+        datasets: List[Union[PointCloudDataset, GaussianSplatDataset]],
+        include_splats: bool = True
+    ) -> Optional[Tuple[np.ndarray, Union[PointCloudDataset, GaussianSplatDataset]]]:
+        """Return (world_pt, dataset) for the closest visible point/splat near (px, py)."""
+        visible_ds = [
             d for d in datasets
-            if (type(d).__name__ == "PointCloudDataset" or isinstance(d, PointCloudDataset))
-            and d.visible and len(d.coords) > 0
+            if d.visible and len(d.coords) > 0 and (
+                include_splats
+                or type(d).__name__ == "PointCloudDataset"
+                or isinstance(d, PointCloudDataset)
+            )
         ]
-        if not visible_pc:
+        if not visible_ds:
             return None
 
         w = viewport.width()
@@ -130,18 +129,17 @@ class CloudSnapEngine:
             return None
 
         v_id = id(viewport)
-        cam_hash = hash((self._get_cam_hash(viewport), self._datasets_token(visible_pc)))
+        cam_hash = hash((self._get_cam_hash(viewport), self._datasets_token(visible_ds), include_splats))
         if cam_hash != self._vp_cached_cam_hash.get(v_id):
             self._vp_cached_cam_hash[v_id] = cam_hash
             entries = []
             clip_plane = self._get_section_clip_plane(viewport)
 
-            for ds in visible_pc:
+            for ds in visible_ds:
                 pts = ds.coords
                 if len(pts) == 0:
                     continue
 
-                # Subsample candidates BEFORE applying transform to avoid memory exhaustion
                 cand_sub = getattr(ds, '_snap_candidates', None)
                 if cand_sub is None or len(cand_sub) == 0:
                     if len(pts) > 30000:
@@ -160,7 +158,6 @@ class CloudSnapEngine:
                     screen_x, screen_y, in_front = w2p(cand_pts)
                     valid = in_front & (screen_x >= -20) & (screen_x < w + 20) & (screen_y >= -20) & (screen_y < h + 20)
 
-                    # Do not snap to points hidden by the active section plane cut
                     if clip_plane is not None and np.any(valid):
                         nx, ny, nz, d = clip_plane
                         dist = nx * cand_pts[:, 0] + ny * cand_pts[:, 1] + nz * cand_pts[:, 2] + d
@@ -168,7 +165,7 @@ class CloudSnapEngine:
 
                     if np.any(valid):
                         entries.append((
-                            screen_x[valid], screen_y[valid], cand_pts[valid]
+                            screen_x[valid], screen_y[valid], cand_pts[valid], ds
                         ))
                 except Exception:
                     continue
@@ -181,8 +178,17 @@ class CloudSnapEngine:
 
         best_dist_sq = self.snap_radius_px * self.snap_radius_px
         best_pt_world = None
+        best_ds = None
 
-        for screen_x, screen_y, cand_pts in cached_entries:
+        depth_snap = getattr(viewport, "_depth_snap", None)
+        depth_buf = None
+        mvp = None
+        sw, sh = w, h
+        if depth_snap is not None and len(depth_snap) >= 5 and depth_snap[0] is not None:
+            depth_buf, mvp, _, sw, sh = depth_snap[:5]
+
+        for entry in cached_entries:
+            screen_x, screen_y, cand_pts, ds = entry
             dx = screen_x - px
             dy = screen_y - py
             dist_sq = dx * dx + dy * dy
@@ -190,11 +196,44 @@ class CloudSnapEngine:
             mask = dist_sq <= best_dist_sq
             if np.any(mask):
                 valid_indices = np.nonzero(mask)[0]
-                closest_idx = valid_indices[np.argmin(dist_sq[valid_indices])]
-                best_dist_sq = float(dist_sq[closest_idx])
-                best_pt_world = cand_pts[closest_idx]
+                order = valid_indices[np.argsort(dist_sq[valid_indices])]
+                for idx in order:
+                    pt = cand_pts[idx]
+                    if depth_buf is not None and mvp is not None and sw > 0 and sh > 0:
+                        sx_i = float(screen_x[idx])
+                        sy_i = float(screen_y[idx])
+                        ix = int(min(max(sx_i * sw / max(w, 1), 0), sw - 1))
+                        iy = int(min(max((h - 1.0 - sy_i) * sh / max(h, 1), 0), sh - 1))
+                        d_scene = float(depth_buf[iy, ix])
+                        if d_scene < 0.999999:
+                            ndc = mvp.map(QVector3D(float(pt[0]), float(pt[1]), float(pt[2])))
+                            d_pt = 0.5 * (float(ndc.z()) + 1.0)
+                            if d_pt > d_scene + 2e-4:
+                                continue
+                    best_dist_sq = float(dist_sq[idx])
+                    best_pt_world = pt
+                    best_ds = ds
+                    break
 
-        if best_pt_world is not None:
+        if best_pt_world is not None and best_ds is not None:
+            return best_pt_world, best_ds
+        return None
+
+    def snap(
+        self,
+        viewport,
+        snap: Optional[SnapResult],
+        px: int,
+        py: int,
+        datasets: List[Union[PointCloudDataset, GaussianSplatDataset]]
+    ) -> Optional[SnapResult]:
+        """Check if (px, py) is near any point cloud point; return SnapResult if so."""
+        if not self.enabled:
+            return None
+
+        hit = self.find_nearest_point(viewport, float(px), float(py), datasets, include_splats=False)
+        if hit is not None:
+            best_pt_world, _ = hit
             wx, wy, wz = float(best_pt_world[0]), float(best_pt_world[1]), float(best_pt_world[2])
             self.last_hovered_pt = (wx, wy, wz)
 
