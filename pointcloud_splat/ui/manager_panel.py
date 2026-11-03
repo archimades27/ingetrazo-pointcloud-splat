@@ -855,8 +855,9 @@ class PointCloudManagerPanel(QWidget):
         if 0 <= row < len(self.datasets):
             self._active_idx = row
             self._sync_ui_state()
-            grp = getattr(self.datasets[row], "proxy_group", None)
-            if grp is not None:
+            ds = self.datasets[row]
+            grp = getattr(ds, "proxy_group", None)
+            if grp is not None and getattr(ds, "visible", True):
                 try:
                     self.app.scene.select([grp])
                 except Exception:
@@ -872,6 +873,23 @@ class PointCloudManagerPanel(QWidget):
     def _toggle_visibility(self, row: int) -> None:
         ds = self.datasets[row]
         ds.visible = not ds.visible
+        grp = getattr(ds, "proxy_group", None)
+        if grp is not None:
+            grp.hidden = not ds.visible
+            if not ds.visible:
+                try:
+                    sel = getattr(self.app.scene, "selection", None)
+                    if sel is not None and grp in sel:
+                        sel.discard(grp)
+                        self.app.scene.bump_view()
+                except Exception:
+                    pass
+        vp = getattr(self.app, "viewport", None)
+        if vp is not None:
+            vp._pick_index_cache = None
+            vp._hover_hits_cache = None
+            vp._face_any_memo = None
+            vp._pick_block = None
         self._refresh_table()
         self.app.viewport.update()
 

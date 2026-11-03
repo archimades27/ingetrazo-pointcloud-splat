@@ -335,27 +335,29 @@ class CloudRenderer:
             P23 = float(pm(2, 3))
             P32 = float(pm(3, 2))
 
-            ndc_z = d_top.astype(np.float32) * 2.0 - 1.0
             sky_mask = d_top >= 0.999999
+            # Subtract window-depth bias in float64 before hyperbolic inversion to
+            # accurately undo OpenGL glPolygonOffset(1.0, 1.0) at both near and far (100m+) distances.
+            d_adj = np.maximum(d_top.astype(np.float64) - 1.5e-6, 0.0)
+            ndc_z = d_adj * 2.0 - 1.0
 
             if abs(P32) > 0.1:
                 # Perspective projection: ndc_z = -P22 + P23 / z  =>  z = P23 / (ndc_z + P22)
                 denom = ndc_z + P22
-                valid = (~sky_mask) & (np.abs(denom) > 1e-7)
+                valid = (~sky_mask) & (np.abs(denom) > 1e-9)
                 z_scene = np.full((h, w), 1e9, dtype=np.float32)
-                z_scene[valid] = P23 / denom[valid]
+                z_scene[valid] = (P23 / denom[valid]).astype(np.float32)
                 z_scene[z_scene <= 0.0] = 1e9
             else:
                 # Orthographic projection: ndc_z = -P22 * z + P23  =>  z = (P23 - ndc_z) / P22
                 z_scene = np.full((h, w), 1e9, dtype=np.float32)
                 if abs(P22) > 1e-9:
                     valid = ~sky_mask
-                    z_scene[valid] = (P23 - ndc_z[valid]) / P22
+                    z_scene[valid] = ((P23 - ndc_z[valid]) / P22).astype(np.float32)
 
-            # Compensate for OpenGL glPolygonOffset(1.0, 1.0) on CAD faces so coplanar points
-            # do not bleed through modeled surfaces, while points in front remain visible.
+            # Small linear tolerance so coplanar scan points do not bleed through modeled surfaces
             fg = z_scene < 1e8
-            z_scene[fg] = z_scene[fg] * 0.9985 - 0.005
+            z_scene[fg] = z_scene[fg] * 0.998 - 0.02
             return np.ascontiguousarray(z_scene, dtype=np.float32)
         except Exception as e:
             log.debug(f"Scene depth extraction failed: {e}")

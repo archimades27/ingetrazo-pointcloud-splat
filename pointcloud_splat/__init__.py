@@ -33,6 +33,7 @@ from tools.base import Tool
 from core.i18n import tr
 
 from .renderer import CloudRenderer
+from .scene_proxy import is_pointcloud_proxy
 from .snap_engine import CloudSnapEngine
 from .ui.manager_panel import PointCloudManagerPanel, PointCloudDialog
 
@@ -166,24 +167,65 @@ def setup(app) -> None:
                 return False
             Viewport._annotations_need_depth = _wrapped_annotations_need_depth
 
+        SceneCls = type(app.scene) if getattr(app, "scene", None) is not None else None
+        if SceneCls is not None:
+            if not hasattr(SceneCls, "_orig_entity_visible_pcsplat"):
+                SceneCls._orig_entity_visible_pcsplat = SceneCls.entity_visible
+                def _wrapped_entity_visible(self_scene, entity):
+                    if is_pointcloud_proxy(entity):
+                        return False
+                    return SceneCls._orig_entity_visible_pcsplat(self_scene, entity)
+                SceneCls.entity_visible = _wrapped_entity_visible
+
+            if not hasattr(SceneCls, "_orig_entity_selectable_pcsplat"):
+                SceneCls._orig_entity_selectable_pcsplat = SceneCls.entity_selectable
+                def _wrapped_entity_selectable(self_scene, entity):
+                    if is_pointcloud_proxy(entity):
+                        return False
+                    return SceneCls._orig_entity_selectable_pcsplat(self_scene, entity)
+                SceneCls.entity_selectable = _wrapped_entity_selectable
+
+        if not hasattr(Viewport, "_orig_begin_group_edit_pcsplat") and hasattr(Viewport, "begin_group_edit"):
+            Viewport._orig_begin_group_edit_pcsplat = Viewport.begin_group_edit
+            def _wrapped_begin_group_edit(self, group, *args, **kwargs):
+                if is_pointcloud_proxy(group):
+                    return None
+                return Viewport._orig_begin_group_edit_pcsplat(self, group, *args, **kwargs)
+            Viewport.begin_group_edit = _wrapped_begin_group_edit
+
         if not hasattr(Viewport, "_orig_pick_group_pcsplat"):
             Viewport._orig_pick_group_pcsplat = Viewport.pick_group
-            def _wrapped_pick_group(self, screen_x, screen_y):
-                grp = Viewport._orig_pick_group_pcsplat(self, screen_x, screen_y)
-                if grp is not None:
-                    return grp
-                try:
-                    se = getattr(app, "_cloud_snap_engine", snap_engine)
-                    p = panel if panel else getattr(getattr(self, "window", lambda: None)(), "_pointcloud_panel", None)
-                    if se and p and p.datasets:
-                        hit = se.find_nearest_point(self, float(screen_x), float(screen_y), p.datasets)
-                        if hit is not None:
-                            _, ds = hit
+        def _wrapped_pick_group(self, screen_x, screen_y):
+            grp = Viewport._orig_pick_group_pcsplat(self, screen_x, screen_y)
+            if grp is not None and not is_pointcloud_proxy(grp):
+                return grp
+            try:
+                if getattr(self.scene, "edit_group", None) is not None:
+                    return None
+                # Never hijack clicks when any native CAD entity (face, edge, guide,
+                # dimension, label, section plane, image) is under the cursor.
+                if self.pick_face(screen_x, screen_y) is not None:
+                    return None
+                pick_vis_edge = getattr(self, "pick_visible_edge", None) or getattr(self, "pick_edge", None)
+                if pick_vis_edge is not None and pick_vis_edge(screen_x, screen_y) is not None:
+                    return None
+                for fn_name in ("pick_guide", "pick_dimension", "pick_text_label", "pick_section_plane", "pick_image_plane"):
+                    fn = getattr(self, fn_name, None)
+                    if fn is not None and fn(screen_x, screen_y) is not None:
+                        return None
+
+                se = getattr(app, "_cloud_snap_engine", snap_engine)
+                p = panel if panel else getattr(getattr(self, "window", lambda: None)(), "_pointcloud_panel", None)
+                if se and p and p.datasets:
+                    hit = se.find_nearest_point(self, float(screen_x), float(screen_y), p.datasets)
+                    if hit is not None:
+                        _, ds = hit
+                        if getattr(ds, "visible", True):
                             return getattr(ds, "proxy_group", None)
-                except Exception:
-                    pass
-                return None
-            Viewport.pick_group = _wrapped_pick_group
+            except Exception:
+                pass
+            return None
+        Viewport.pick_group = _wrapped_pick_group
 
         # Ensure switching to standard views (Top, Front, Right, etc.) frames point clouds
         import math

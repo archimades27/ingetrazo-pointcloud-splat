@@ -50,8 +50,24 @@ def _proxy_raw_corners(dataset) -> Tuple[np.ndarray, np.ndarray]:
     return raw_corners, piv
 
 
+def is_pointcloud_proxy(entity) -> bool:
+    """Return True if entity is a point cloud or Gaussian splat proxy group."""
+    if entity is None:
+        return False
+    ext = getattr(entity, "ext", None)
+    if isinstance(ext, dict) and ext.get("type") == "pointcloud_proxy":
+        return True
+    name = getattr(entity, "name", None)
+    if isinstance(name, str) and name.startswith(("Point Cloud: ", "Gaussian Splat: ")):
+        return True
+    return False
+
+
 def create_pointcloud_proxy(dataset, scene) -> Group:
     """Create a native IngeTrazo Group representing the point cloud volume."""
+    kind = "Gaussian Splat" if getattr(dataset, "is_gaussian_splat", False) else "Point Cloud"
+    target_name = f"{kind}: {dataset.name}"
+
     # Remove existing proxy if any
     old_grp = getattr(dataset, "proxy_group", None)
     if old_grp is not None and old_grp in scene.groups:
@@ -81,11 +97,11 @@ def create_pointcloud_proxy(dataset, scene) -> Group:
         e.hidden = True
     m._chunk_dirty = True
 
-    kind = "Gaussian Splat" if getattr(dataset, "is_gaussian_splat", False) else "Point Cloud"
-    grp = Group(m, name=f"{kind}: {dataset.name}")
+    grp = Group(m, name=target_name)
     # Fully transparent faces
     grp.material = {"color": (0.2, 0.6, 0.9), "opacity": 0.0}
     grp.ext = {"type": "pointcloud_proxy", "dataset_name": dataset.name}
+    grp.hidden = not bool(getattr(dataset, "visible", True))
 
     dataset.proxy_group = grp
     sync_proxy_from_dataset(dataset)
