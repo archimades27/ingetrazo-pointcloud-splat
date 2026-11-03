@@ -37,6 +37,8 @@ from .scene_proxy import is_pointcloud_proxy
 from .snap_engine import CloudSnapEngine
 from .ui.manager_panel import PointCloudManagerPanel, PointCloudDialog
 
+__version__ = "1.0.1"
+
 log = logging.getLogger("ingetrazo.plugins.pointcloud_splat")
 
 _panel_instance: Optional[PointCloudManagerPanel] = None
@@ -46,7 +48,7 @@ _dialog_instance: Optional[PointCloudDialog] = None
 class PointCloudSplatTool(Tool):
     """Tool registered into IngeTrazo's Extensions menu."""
     name = "Point Cloud & Gaussian Splatting"
-    shortcut = "Ctrl+Shift+P"
+    shortcut = None
     description = "Import, inspect, and snap to point clouds (.ply, .las, .xyz) and 3D Gaussian Splats (.splat)."
     uses_snap = False
 
@@ -332,6 +334,20 @@ def setup(app) -> None:
             summon,
             tip=tr("Import and manage point clouds and 3D Gaussian Splats.")
         )
+
+        # Register Outliner / Browser kind metadata per IngeTrazo Extension API 2
+        if hasattr(app, "add_outliner_kind"):
+            try:
+                app.add_outliner_kind(
+                    lambda group: {
+                        "type": tr("Point Cloud"),
+                        "props": [(tr("Dataset"), (group.ext or {}).get("dataset_name", group.name))],
+                    }
+                    if is_pointcloud_proxy(group)
+                    else None
+                )
+            except Exception:
+                pass
 
         log.info("[PointCloudSplat] Extension initialized successfully.")
     except Exception as e:

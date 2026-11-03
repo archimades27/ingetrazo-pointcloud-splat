@@ -2,7 +2,7 @@
 
 [![IngeTrazo](https://img.shields.io/badge/IngeTrazo-v0.5.7+-007ACC.svg)](https://ingetrazo.com)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/tag/v1.0.0)
+[![Version](https://img.shields.io/badge/Version-1.0.1-orange.svg)](https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/tag/v1.0.1)
 [![YouTube Preview](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000.svg?logo=youtube&logoColor=white)](https://youtu.be/XS2TN14EPjI)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-yellow.svg)]()
 [![Platform: macOS | Linux | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
@@ -20,6 +20,16 @@
 The **Point Cloud & 3D Gaussian Splatting** extension brings native, interactive reality-capture workflows directly inside **IngeTrazo**. It enables architects, engineers, surveyors, and 3D designers to import aerial drone scans, terrestrial LiDAR datasets, photogrammetry models, and volumetric radiance fields (*3D Gaussian Splats*), providing **sub-millisecond viewport rendering (up to 60+ FPS)**, architectural 3D section slicing, and **native CAD snapping** for precision as-built modeling and Scan-to-BIM reconstruction.
 
 ![IngeTrazo Point Cloud & Gaussian Splatting UI](screenshots/pointcloud_splat.png)
+
+---
+
+## 🆕 What's New in v1.0.1
+
+See [WHATSNEW.md](WHATSNEW.md) for the complete technical changelog. Highlights include:
+* **True 3D Depth Buffer Occlusion & Overlap**: Point clouds and 3D Gaussian Splats now test against IngeTrazo's OpenGL depth buffer (`_depth_snap`) with float64 polygon-offset compensation so CAD geometry and large-scale drone scans (100m+) overlap and intersect accurately in 3D space.
+* **Unobstructed CAD Selection & Editing Inside Scans**: Replaced the 6-face proxy box with a non-blocking 0-face proxy and updated viewport picking hooks (`pick_group`, `entity_visible`, `entity_selectable`, `begin_group_edit`) so loose faces, edges, Push/Pull, Move, and crossing-box selection work seamlessly inside both visible and hidden point clouds.
+* **Clean Visibility & Selection Sync**: Hiding a point cloud now immediately hides and deselects its scene proxy and flushes viewport pick caches.
+* **Undoable Scan-to-BIM & Native Scale Sync**: Wrapped Scan-to-BIM actions in IngeTrazo's `SnapshotImport` undo/redo layer (`docs/plugins.md`), added native Scale (`S`) tool recovery, cached world bounds, multi-viewport buffer resize safety, and cross-platform C kernel (`fast_splat.c`) support.
 
 ---
 

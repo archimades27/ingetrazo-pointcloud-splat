@@ -9,11 +9,12 @@ Panduan lengkap ini menjelaskan langkah-langkah praktis untuk mempublikasikan ek
 Semua berkas persiapan telah siap di folder:
 `/Users/archimades/.gemini/antigravity/scratch/ingetrazo-pointcloud-splat/`
 
-1. **`dist/pointcloud_splat.zip`**: Arsip zip bersih berisi folder tunggal `pointcloud_splat/` dengan `__init__.py`.
-2. **`pointcloud_splat.toml`**: Berkas manifest katalog resmi yang sudah terisi lengkap dengan hash SHA-256 (`ae95b72a90c06bf8ea894083db9f4a6ae24cd5ffe42de4415fb2d44921c22422`).
-3. **`screenshots/pointcloud_splat.png`**: Gambar banner resolusi 1200×750 (<600 KB) untuk tampilan kartu di website.
-4. **`README.md` & `LICENSE`**: Dokumentasi lengkap dan lisensi GPL-3.0.
-5. **`tools/build_package.py`**: Skrip otomatis jika Anda melakukan perubahan kode dan ingin membuat zip + hash baru.
+1. **`dist/pointcloud_splat.zip`**: Arsip zip bersih berisi folder tunggal `pointcloud_splat/` dengan `__init__.py` (versi `v1.0.1`).
+2. **`pointcloud_splat.toml`**: Berkas manifest katalog resmi yang sudah terisi lengkap dengan versi `1.0.1`, `[description]`, dan hash SHA-256 (`a7801d4c12e29f7a75550d7b97cbd302a8ecf4b3fb28ad56281d1926fec93818`).
+3. **`WHATSNEW.md`**: Catatan rilis lengkap semua perbaikan pada `v1.0.1`.
+4. **`screenshots/pointcloud_splat.png`**: Gambar banner resolusi 1200×750 (<600 KB) untuk tampilan kartu di website.
+5. **`README.md` & `LICENSE`**: Dokumentasi lengkap dan lisensi GPL-3.0.
+6. **`tools/build_package.py`**: Skrip otomatis jika Anda melakukan perubahan kode dan ingin membuat zip + hash baru.
 
 ---
 
@@ -35,40 +36,42 @@ Semua berkas persiapan telah siap di folder:
 
 ---
 
-## 🏷️ Langkah 2: Buat Release `v1.0.0` di GitHub
+## 🏷️ Langkah 2: Buat Release `v1.0.1` di GitHub
 
 Katalog IngeTrazo mewajibkan tautan unduhan permanen yang diikat ke Release/Tag tertentu (bukan link branch `main`):
 
-1. Di repositori GitHub Anda, buka tab **Releases** di kolom kanan, lalu klik **Create a new release** (atau buka `https://github.com/<USERNAME-ANDA>/ingetrazo-pointcloud-splat/releases/new`).
-2. Masukkan tag: **`v1.0.0`** (buat tag baru saat publikasi).
-3. Beri judul rilis: `v1.0.0 - Point Cloud & 3D Gaussian Splatting`.
-4. Unggah berkas **`dist/pointcloud_splat.zip`** ke bagian aset rilis (*Attach binaries by dropping them here*).
-5. Klik **Publish release**.
+1. Di repositori GitHub Anda, buka tab **Releases** di kolom kanan, lalu klik **Draft a new release** (atau buka `https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/new?tag=v1.0.1`).
+2. Pilih tag **`v1.0.1`** (sudah di-push ke GitHub).
+3. Beri judul rilis: `v1.0.1 - Point Cloud & 3D Gaussian Splatting`.
+4. Salin isi dari **`WHATSNEW.md`** ke bagian deskripsi rilis.
+5. Unggah berkas **`dist/pointcloud_splat.zip`** ke bagian aset rilis (*Attach binaries by dropping them here*).
+6. Klik **Publish release**.
 
 > **Verifikasi Link Download**:
 > URL download Anda akan menjadi:
-> `https://github.com/<USERNAME-ANDA>/ingetrazo-pointcloud-splat/releases/download/v1.0.0/pointcloud_splat.zip`
+> `https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/download/v1.0.1/pointcloud_splat.zip`
 
 ---
 
-## 📝 Langkah 3: Sesuaikan Username di `pointcloud_splat.toml`
+## 📝 Langkah 3: Isi `pointcloud_splat.toml` untuk Update Katalog `v1.0.1`
 
-Buka berkas `pointcloud_splat.toml` di teks editor, pastikan nama dan URL mengarah ke akun GitHub Anda:
+Berkas `pointcloud_splat.toml` sudah diperbarui ke versi `1.0.1`:
 ```toml
 id = "pointcloud_splat"
-version = "1.0.0"
-author = "Nama atau Handle Anda"
-author_url = "https://github.com/<USERNAME-ANDA>"
+version = "1.0.1"
+author = "archimades27"
+author_url = "https://github.com/archimades27"
 
 license = "GPL-3.0-or-later"
 
-repository = "https://github.com/<USERNAME-ANDA>/ingetrazo-pointcloud-splat"
-download = "https://github.com/<USERNAME-ANDA>/ingetrazo-pointcloud-splat/releases/download/v1.0.0/pointcloud_splat.zip"
-sha256 = "ae95b72a90c06bf8ea894083db9f4a6ae24cd5ffe42de4415fb2d44921c22422"
+repository = "https://github.com/archimades27/ingetrazo-pointcloud-splat"
+download = "https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/download/v1.0.1/pointcloud_splat.zip"
+sha256 = "a7801d4c12e29f7a75550d7b97cbd302a8ecf4b3fb28ad56281d1926fec93818"
 
 ingetrazo = "0.5.7"
 tags = ["bim", "productivity", "drawing"]
 screenshot = "pointcloud_splat.png"
+```
 
 [name]
 en = "Point Cloud & 3D Gaussian Splatting"

@@ -1248,19 +1248,45 @@ class PointCloudManagerPanel(QWidget):
         QMessageBox.information(self, title, tr("Select a dataset in the list first."))
         return None
 
+    def _execute_scene_mutation(self, mutate_fn) -> None:
+        """Execute a scene mutation through IngeTrazo's undoable SnapshotImport command layer."""
+        vp = getattr(self.app, "viewport", None)
+        scene = getattr(self.app, "scene", None)
+        if vp is not None and hasattr(vp, "history"):
+            try:
+                from core.history import SnapshotImport
+                vp.history.execute(SnapshotImport(mutate_fn))
+                if hasattr(vp, "notify_scene_changed"):
+                    vp.notify_scene_changed()
+                else:
+                    vp.update()
+                return
+            except Exception:
+                pass
+        if scene is not None:
+            mutate_fn(scene)
+        if vp is not None:
+            if hasattr(vp, "notify_scene_changed"):
+                vp.notify_scene_changed()
+            else:
+                vp.update()
+
     def _fit_plane(self) -> None:
         ds = self._active_or_warn(tr("Fit Dominant Plane"))
         if ds is None:
             return
+        holder = [None]
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            grp = create_plane_surface_group(ds, self.app.scene)
+            def mutate(scene):
+                holder[0] = create_plane_surface_group(ds, scene)
+            self._execute_scene_mutation(mutate)
         finally:
             QApplication.restoreOverrideCursor()
+        grp = holder[0]
         if grp:
             self._set_status(tr("Created plane: {name}", name=grp.name))
             self.app.viewport.flash_status(tr("Created planar surface group: {name}", name=grp.name))
-            self.app.viewport.update()
         else:
             QMessageBox.warning(self, tr("Fit Dominant Plane"),
                                 tr("Could not fit a planar surface (not enough co-planar points)."))
@@ -1269,19 +1295,26 @@ class PointCloudManagerPanel(QWidget):
         ds = self._active_or_warn(tr("Create Bounding Box"))
         if ds is None:
             return
-        grp = create_bounding_box_group(ds, self.app.scene)
-        self._set_status(tr("Created bounding box: {name}", name=grp.name))
-        self.app.viewport.flash_status(tr("Created bounding box: {name}", name=grp.name))
-        self.app.viewport.update()
+        holder = [None]
+        def mutate(scene):
+            holder[0] = create_bounding_box_group(ds, scene)
+        self._execute_scene_mutation(mutate)
+        grp = holder[0]
+        if grp:
+            self._set_status(tr("Created bounding box: {name}", name=grp.name))
+            self.app.viewport.flash_status(tr("Created bounding box: {name}", name=grp.name))
 
     def _convert_to_guides(self) -> None:
         ds = self._active_or_warn(tr("Add Guide Points"))
         if ds is None:
             return
-        n = convert_to_guide_points(ds, self.app.scene, max_points=120)
+        holder = [0]
+        def mutate(scene):
+            holder[0] = convert_to_guide_points(ds, scene, max_points=120)
+        self._execute_scene_mutation(mutate)
+        n = holder[0]
         self._set_status(tr("Added {n} guide points", n=n))
         self.app.viewport.flash_status(tr("Added {n} reference guide points", n=n))
-        self.app.viewport.update()
 
 
 def _disabled_mode():
