@@ -59,6 +59,7 @@ from ..cad_tools import (
 from ..scene_proxy import (
     create_pointcloud_proxy,
     remove_pointcloud_proxy,
+    sync_dataset_from_proxy,
     sync_proxy_from_dataset,
 )
 from .icons import clear_cache, make_icon
@@ -682,6 +683,34 @@ class PointCloudManagerPanel(QWidget):
                     self._select_row(i)
                     self.tree.blockSignals(False)
                     self._sync_ui_state()
+                else:
+                    spins = (
+                        self.spin_off_x, self.spin_off_y, self.spin_off_z,
+                        self.spin_rot_z, self.spin_rot_x, self.spin_rot_y,
+                        self.spin_scale,
+                    )
+                    if not any(sp.hasFocus() for sp in spins):
+                        prev = (
+                            round(float(ds.offset[0]), 4),
+                            round(float(ds.offset[1]), 4),
+                            round(float(ds.offset[2]), 4),
+                            round(float(ds.rotation_z_deg), 3),
+                            round(float(ds.rotation_x_deg), 3),
+                            round(float(ds.rotation_y_deg), 3),
+                            round(float(ds.scale), 4),
+                        )
+                        sync_dataset_from_proxy(ds, getattr(self.app, "viewport", None))
+                        curr = (
+                            round(float(ds.offset[0]), 4),
+                            round(float(ds.offset[1]), 4),
+                            round(float(ds.offset[2]), 4),
+                            round(float(ds.rotation_z_deg), 3),
+                            round(float(ds.rotation_x_deg), 3),
+                            round(float(ds.rotation_y_deg), 3),
+                            round(float(ds.scale), 4),
+                        )
+                        if curr != prev:
+                            self._sync_ui_state()
                 return
 
     def _select_in_viewport(self) -> None:

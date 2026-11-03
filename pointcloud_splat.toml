@@ -11,7 +11,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/archimades27/ingetrazo-pointcloud-splat"
 
 download = "https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/download/v1.0.0/pointcloud_splat.zip"
-sha256 = "ae95b72a90c06bf8ea894083db9f4a6ae24cd5ffe42de4415fb2d44921c22422"
+sha256 = "4ceca774b96b10c446a4c8e3afaa7dbe0159b45a716b4a8d2720f6d7fc8a8326"
 
 ingetrazo = "0.5.7"
 

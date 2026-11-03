@@ -24,6 +24,32 @@ from core.group import Group
 log = logging.getLogger("ingetrazo.plugins.pointcloud_splat.scene_proxy")
 
 
+def _proxy_raw_corners(dataset) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (8x3 raw_corners, 3-element pivot) with a minimum thickness on degenerate axes."""
+    if dataset._raw_bounds is None:
+        if len(dataset.coords) > 0:
+            min_p = np.min(dataset.coords, axis=0).astype(np.float32)
+            max_p = np.max(dataset.coords, axis=0).astype(np.float32)
+            dataset._raw_bounds = (min_p, max_p)
+        else:
+            min_p = np.zeros(3, dtype=np.float32)
+            max_p = np.ones(3, dtype=np.float32)
+            dataset._raw_bounds = (min_p, max_p)
+
+    min_p, max_p = dataset._raw_bounds
+    mid = (min_p + max_p) * 0.5
+    half = np.maximum((max_p - min_p) * 0.5, 0.01)
+    x0, y0, z0 = float(mid[0] - half[0]), float(mid[1] - half[1]), float(mid[2] - half[2])
+    x1, y1, z1 = float(mid[0] + half[0]), float(mid[1] + half[1]), float(mid[2] + half[2])
+
+    raw_corners = np.array([
+        [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+        [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
+    ], dtype=np.float32)
+    piv = dataset.pivot if getattr(dataset, "pivot", None) is not None else mid.astype(np.float32)
+    return raw_corners, piv
+
+
 def create_pointcloud_proxy(dataset, scene) -> Group:
     """Create a native IngeTrazo Group representing the point cloud volume."""
     # Remove existing proxy if any
@@ -34,40 +60,21 @@ def create_pointcloud_proxy(dataset, scene) -> Group:
         except Exception:
             pass
 
-    if dataset._raw_bounds is None:
-        if len(dataset.coords) > 0:
-            min_p = np.min(dataset.coords, axis=0)
-            max_p = np.max(dataset.coords, axis=0)
-            dataset._raw_bounds = (min_p, max_p)
-        else:
-            min_p = np.zeros(3, dtype=np.float32)
-            max_p = np.ones(3, dtype=np.float32)
-            dataset._raw_bounds = (min_p, max_p)
-
-    min_p, max_p = dataset._raw_bounds
-    x0, y0, z0 = float(min_p[0]), float(min_p[1]), float(min_p[2])
-    x1, y1, z1 = float(max_p[0]), float(max_p[1]), float(max_p[2])
+    raw_corners, _ = _proxy_raw_corners(dataset)
 
     # 8 corner vertices of the bounding volume
-    c0 = QVector3D(x0, y0, z0)
-    c1 = QVector3D(x1, y0, z0)
-    c2 = QVector3D(x1, y1, z0)
-    c3 = QVector3D(x0, y1, z0)
-    c4 = QVector3D(x0, y0, z1)
-    c5 = QVector3D(x1, y0, z1)
-    c6 = QVector3D(x1, y1, z1)
-    c7 = QVector3D(x0, y1, z1)
+    c = [QVector3D(float(pt[0]), float(pt[1]), float(pt[2])) for pt in raw_corners]
 
     m = Mesh()
     # 6 faces with transparent material so points inside are completely visible,
     # but ray-picking (pick_group) instantly hits any click over the point cloud volume.
     # Preserve exact vertex order c0..c7:
-    m.add_face([c0, c1, c2, c3])  # Bottom: v0..v3
-    m.add_face([c4, c5, c6, c7])  # Top:    v4..v7
-    m.add_face([c0, c1, c5, c4])  # Front
-    m.add_face([c2, c3, c7, c6])  # Back
-    m.add_face([c3, c0, c4, c7])  # Left
-    m.add_face([c1, c2, c6, c5])  # Right
+    m.add_face([c[0], c[1], c[2], c[3]])  # Bottom: v0..v3
+    m.add_face([c[4], c[5], c[6], c[7]])  # Top:    v4..v7
+    m.add_face([c[0], c[1], c[5], c[4]])  # Front
+    m.add_face([c[2], c[3], c[7], c[6]])  # Back
+    m.add_face([c[3], c[0], c[4], c[7]])  # Left
+    m.add_face([c[1], c[2], c[6], c[5]])  # Right
 
     # Hide default OpenGL black wireframe edges so only the point cloud and custom selection outline show
     for e in m.edges:
@@ -81,6 +88,7 @@ def create_pointcloud_proxy(dataset, scene) -> Group:
     grp.ext = {"type": "pointcloud_proxy", "dataset_name": dataset.name}
 
     dataset.proxy_group = grp
+    sync_proxy_from_dataset(dataset)
     scene.groups.append(grp)
     return grp
 
@@ -125,22 +133,14 @@ def compute_dataset_transform(dataset, viewport=None) -> Tuple[np.ndarray, np.nd
     if len(vertices) < 8:
         return np.eye(3, dtype=np.float32), dataset.offset
 
-    min_p, max_p = dataset._raw_bounds
-    x0, y0, z0 = float(min_p[0]), float(min_p[1]), float(min_p[2])
-    x1, y1, z1 = float(max_p[0]), float(max_p[1]), float(max_p[2])
-
-    raw_corners = np.array([
-        [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-        [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
-    ], dtype=np.float32)
-    cA = (min_p + max_p) * 0.5
+    raw_corners, cA = _proxy_raw_corners(dataset)
 
     curr_corners = np.array(
         [[v.position.x(), v.position.y(), v.position.z()] for v in vertices[:8]],
         dtype=np.float32
     )
 
-    # Check live Move / Rotate interactive preview in viewport
+    # Check live Move / Rotate / Scale interactive preview in viewport
     if viewport is not None and hasattr(viewport, 'scene') and grp in getattr(viewport.scene, 'selection', ()):
         mat = getattr(viewport, '_preview_matrix', None)
         off = getattr(viewport, '_preview_offset', None)
@@ -158,21 +158,41 @@ def compute_dataset_transform(dataset, viewport=None) -> Tuple[np.ndarray, np.nd
     P = raw_corners - cA
     Q = curr_corners - cB
 
+    # Recover uniform scale if modified via native Scale tool
+    p_norm = float(np.linalg.norm(P))
+    q_norm = float(np.linalg.norm(Q))
+    if p_norm > 1e-6 and q_norm > 1e-8:
+        inferred_scale = q_norm / p_norm
+        cur_scale = float(getattr(dataset, "scale", 1.0))
+        if abs(inferred_scale - cur_scale) / max(cur_scale, 1e-6) > 1e-3:
+            dataset.scale = inferred_scale
+
     # Kabsch algorithm to find optimal rotation matrix R
     H = P.T @ Q
     try:
         U, S, Vt = np.linalg.svd(H)
-        d = np.linalg.det(Vt.T @ U.T)
-        R = Vt.T @ np.diag([1.0, 1.0, d]) @ U.T
+        d = float(np.linalg.det(Vt.T @ U.T))
+        R = (Vt.T @ np.diag([1.0, 1.0, d]) @ U.T).astype(np.float32)
     except Exception:
         R = np.eye(3, dtype=np.float32)
 
-    T = cB - cA
+    T = (cB - cA).astype(np.float32)
+    return R, T
+
+
+def sync_dataset_from_proxy(dataset, viewport=None) -> Tuple[np.ndarray, np.ndarray]:
+    """Sync dataset offset, Euler angles, and scale from its scene proxy group and return (R, T)."""
+    R, T = compute_dataset_transform(dataset, viewport)
+    if getattr(dataset, "proxy_group", None) is not None:
+        dataset.offset = T
+        dataset.rotation_z_deg = float(math.degrees(math.atan2(R[1, 0], R[0, 0])))
+        dataset.rotation_x_deg = float(math.degrees(math.atan2(R[2, 1], R[2, 2])))
+        dataset.rotation_y_deg = float(math.degrees(math.atan2(-R[2, 0], math.hypot(R[2, 1], R[2, 2]))))
     return R, T
 
 
 def sync_proxy_from_dataset(dataset) -> None:
-    """Updates proxy group vertices if offset or rotation was modified externally."""
+    """Updates proxy group vertices if offset, rotation, or scale was modified externally."""
     grp = getattr(dataset, "proxy_group", None)
     if grp is None or dataset._raw_bounds is None:
         return
@@ -181,15 +201,7 @@ def sync_proxy_from_dataset(dataset) -> None:
     if len(vertices) < 8:
         return
 
-    min_p, max_p = dataset._raw_bounds
-    x0, y0, z0 = float(min_p[0]), float(min_p[1]), float(min_p[2])
-    x1, y1, z1 = float(max_p[0]), float(max_p[1]), float(max_p[2])
-
-    raw_corners = np.array([
-        [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-        [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
-    ], dtype=np.float32)
-    piv = dataset.pivot if dataset.pivot is not None else (min_p + max_p) * 0.5
+    raw_corners, piv = _proxy_raw_corners(dataset)
 
     rx = math.radians(dataset.rotation_x_deg)
     ry = math.radians(dataset.rotation_y_deg)
@@ -203,7 +215,8 @@ def sync_proxy_from_dataset(dataset) -> None:
         [-sy, cy * sx, cy * cx]
     ], dtype=np.float32)
 
-    target_corners = (raw_corners - piv) @ R.T + piv + dataset.offset
+    scale = float(getattr(dataset, "scale", 1.0))
+    target_corners = ((raw_corners - piv) * scale) @ R.T + piv + dataset.offset
     m = grp.mesh
     for i in range(8):
         v = vertices[i]

@@ -3,6 +3,7 @@
 """High-speed binary and ASCII PLY parser for point clouds and 3D Gaussian Splatting."""
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 from pathlib import Path
@@ -71,6 +72,8 @@ def read_ply(path: Union[str, Path]) -> Union[PointCloudDataset, GaussianSplatDa
                 else:
                     is_vertex_element = False
             elif tokens[0] == 'property' and is_vertex_element:
+                if tokens[1] == 'list':
+                    continue
                 prop_type = tokens[1]
                 prop_name = tokens[2]
                 properties.append((prop_name, prop_type))
@@ -91,10 +94,14 @@ def read_ply(path: Union[str, Path]) -> Union[PointCloudDataset, GaussianSplatDa
             
             raw_data = np.fromfile(f, dtype=struct_dtype, count=vertex_count)
         else:
-            # ASCII format
-            # Read remainder of file as lines
-            raw_text = f.read().decode('ascii', errors='ignore')
-            data_arr = np.loadtxt(raw_text.splitlines()[:vertex_count], dtype=np.float32)
+            # ASCII format: read only vertex_count lines
+            vertex_lines = (
+                line.decode('ascii', errors='ignore')
+                for line in itertools.islice(f, vertex_count)
+            )
+            data_arr = np.loadtxt(vertex_lines, dtype=np.float32)
+            if data_arr.ndim == 1:
+                data_arr = data_arr.reshape(1, -1)
             # Map columns to properties
             raw_data = {}
             for i, (name, _) in enumerate(properties):

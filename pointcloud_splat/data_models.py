@@ -91,17 +91,12 @@ class PointCloudDataset:
         piv = self.pivot if self.pivot is not None else np.zeros(3, dtype=np.float32)
         if np.any(piv != 0):
             pts = pts - piv
-        if self.scale != 1.0:
-            pts = pts * self.scale
-
         if self.proxy_group is not None:
             try:
-                from .scene_proxy import compute_dataset_transform
-                R, T = compute_dataset_transform(self, viewport)
-                self.offset = T
-                self.rotation_z_deg = float(math.degrees(math.atan2(R[1, 0], R[0, 0])))
-                self.rotation_x_deg = float(math.degrees(math.atan2(R[2, 1], R[2, 2])))
-                self.rotation_y_deg = float(math.degrees(math.atan2(-R[2, 0], math.hypot(R[2, 1], R[2, 2]))))
+                from .scene_proxy import sync_dataset_from_proxy
+                R, T = sync_dataset_from_proxy(self, viewport)
+                if self.scale != 1.0:
+                    pts = pts * self.scale
                 pts = pts @ R.T
                 if np.any(piv != 0):
                     pts = pts + piv
@@ -110,6 +105,9 @@ class PointCloudDataset:
                 return pts
             except Exception:
                 pass
+
+        if self.scale != 1.0:
+            pts = pts * self.scale
 
         rx = math.radians(self.rotation_x_deg)
         ry = math.radians(self.rotation_y_deg)
@@ -213,17 +211,12 @@ class GaussianSplatDataset:
         piv = self.pivot if self.pivot is not None else np.zeros(3, dtype=np.float32)
         if np.any(piv != 0):
             pts = pts - piv
-        if self.scale != 1.0:
-            pts = pts * self.scale
-
         if self.proxy_group is not None:
             try:
-                from .scene_proxy import compute_dataset_transform
-                R, T = compute_dataset_transform(self, viewport)
-                self.offset = T
-                self.rotation_z_deg = float(math.degrees(math.atan2(R[1, 0], R[0, 0])))
-                self.rotation_x_deg = float(math.degrees(math.atan2(R[2, 1], R[2, 2])))
-                self.rotation_y_deg = float(math.degrees(math.atan2(-R[2, 0], math.hypot(R[2, 1], R[2, 2]))))
+                from .scene_proxy import sync_dataset_from_proxy
+                R, T = sync_dataset_from_proxy(self, viewport)
+                if self.scale != 1.0:
+                    pts = pts * self.scale
                 pts = pts @ R.T
                 if np.any(piv != 0):
                     pts = pts + piv
@@ -232,6 +225,9 @@ class GaussianSplatDataset:
                 return pts
             except Exception:
                 pass
+
+        if self.scale != 1.0:
+            pts = pts * self.scale
 
         rx = math.radians(self.rotation_x_deg)
         ry = math.radians(self.rotation_y_deg)

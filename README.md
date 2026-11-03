@@ -57,14 +57,13 @@ The **Point Cloud & 3D Gaussian Splatting** extension brings native, interactive
 
 ### 🏛️ 5. Automated Scan-to-BIM & Reverse Engineering
 * **RANSAC Dominant Plane Detection**: Automatically extracts structural planar surfaces (walls, floors, ceiling slabs) from raw point clouds and generates native IngeTrazo face groups.
-* **3D Oriented Bounding Box (OBB)**: Computes the tightest bounding volume enclosing a scan cluster.
+* **3D Bounding Box**: Computes and creates a native bounding volume group enclosing the active scan.
 * **Convert to Guide Points**: Converts key cloud points into permanent IngeTrazo construction guide points.
 
 ### 🧪 6. Built-in Procedural Synthetic Demos
-* Experiment immediately without downloading gigabyte-sized scan files using built-in procedural generators:
-  - **🏛️ Classic Facade**: Multi-story architectural facade with columns and window openings.
-  - **🌐 Geodesic Dome**: Parametric hemispherical dome structure rendered as 3D Gaussian Splats.
-  - **⛰️ Mountain Terrain**: Topographic terrain model colored with elevation colormaps.
+* Experiment immediately without downloading gigabyte-sized scan files using built-in procedural generators under **Import ▸ Sample Data**:
+  - **🏛️ Architectural LiDAR Scan**: Realistic pavilion LiDAR scan (~45,000 points) with granite tile floor, 4 circular travertine columns, perimeter walls with door/window openings, vaulted roof, and simulated sensor noise.
+  - **🌐 Gaussian Splat Scene**: Volumetric 3D Gaussian Splatting sculpture (~24,000 anisotropic splats) with full 3D covariance, quaternion orientations, and radiant gradient colors.
 
 ---
 
@@ -74,12 +73,11 @@ The **Point Clouds & Splats** dock panel appears in IngeTrazo's right tray dock:
 
 | Panel Section | Features & Controls |
 | :--- | :--- |
-| **Datasets Manager** | Lists active scans, toggle visibility (eye icon), camera focus (center on dataset), opacity slider, and dataset removal. |
-| **Display & Shading** | Choose shading mode (*RGB, Turbo, Viridis, Jet, Terrain, Intensity, Normals*), adjust point size (1–12 px), and configure splat scale. |
-| **3D Transform & Gizmo** | Adjust Position Offset (X, Y, Z), Rotation Angles (Yaw, Pitch, Roll), and Uniform Scale Factor to align scans with CAD geometry. |
-| **3D Section Box** | Toggle section box slicing and interactively adjust XYZ bounding bounds. |
-| **CAD Snapping** | Enable/disable snap-to-cloud and adjust screen pixel search tolerance (10–50 px). |
-| **Scan-to-BIM Tools** | One-click RANSAC Plane Extraction, 3D Bounding Box generation, and Guide Points creation. |
+| **Datasets List** | Lists active scans, toggle visibility (eye icon), zoom-to-fit, viewport selection, drag-and-drop import, and dataset removal. |
+| **Display** | Choose shading mode (*True Color RGB/SH, Elevation Turbo/Viridis/Jet/Terrain, Intensity, Surface Normals, Solid Color*), point size (1–14 px), splat scale, opacity, and frame point budget. |
+| **Section Box** | Toggle 3D section box slicing, adjust XYZ Min/Max bounds, and one-click fit to the active dataset. |
+| **Transform** | Interactive viewport placement with native **Move (`M`)**, **Rotate (`Q`/`R`)**, and **Scale (`S`)** tools (with Undo/Redo), plus numeric Offset, Yaw/Tilt rotation, and unit conversion presets. |
+| **Scan-to-BIM** | Toggle CAD point snapping, Fit Dominant Plane (RANSAC), Create Bounding Box, and Add Guide Points. |
 
 ---
 

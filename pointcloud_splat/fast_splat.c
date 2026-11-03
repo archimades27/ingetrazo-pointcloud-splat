@@ -2,7 +2,17 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __APPLE__
 #include <dispatch/dispatch.h>
+#define PARALLEL_FOR_BEGIN(n_items, idx_var) \
+    dispatch_apply((size_t)(n_items), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(size_t idx_var) {
+#define PARALLEL_FOR_END() });
+#else
+#define PARALLEL_FOR_BEGIN(n_items, idx_var) \
+    for (size_t idx_var = 0; idx_var < (size_t)(n_items); idx_var++) {
+#define PARALLEL_FOR_END() }
+#endif
 
 #define MAX_RADIUS 128.0f
 #define NUM_SLICES 16
@@ -66,9 +76,8 @@ void sort_splats_depth_c(
 
     int chunk_size = 16384;
     int n_chunks = (n_sort + chunk_size - 1) / chunk_size;
-    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0);
 
-    dispatch_apply(n_chunks, queue, ^(size_t chunk_idx) {
+    PARALLEL_FOR_BEGIN(n_chunks, chunk_idx)
         int start = (int)chunk_idx * chunk_size;
         int end = start + chunk_size;
         if (end > n_sort) end = n_sort;
@@ -93,7 +102,7 @@ void sort_splats_depth_c(
                 depths[j] = (wx - eye_x) * fwd_x + (wy - eye_y) * fwd_y + (wz - eye_z) * fwd_z;
             }
         }
-    });
+    PARALLEL_FOR_END()
 
     float d_min = depths[0];
     float d_max = depths[0];
@@ -207,13 +216,11 @@ void rasterize_splats_direct(
     SplatData *splats = (SplatData *)malloc(sizeof(SplatData) * n_draw);
     if (!splats) return;
 
-    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0);
-
     // Phase 1: Parallel projection & geometry setup
     int chunk_size = 4096;
     int n_chunks = (n_draw + chunk_size - 1) / chunk_size;
 
-    dispatch_apply(n_chunks, queue, ^(size_t chunk_idx) {
+    PARALLEL_FOR_BEGIN(n_chunks, chunk_idx)
         int start = (int)chunk_idx * chunk_size;
         int end = start + chunk_size;
         if (end > n_draw) end = n_draw;
@@ -385,7 +392,7 @@ void rasterize_splats_direct(
             splats[k].b = col[2];
             splats[k].base_alpha = base_alpha;
         }
-    });
+    PARALLEL_FOR_END()
 
     // Phase 2: Bin valid splats into vertical slices
     SliceBin *bins = (SliceBin *)malloc(sizeof(SliceBin) * NUM_SLICES);
@@ -428,63 +435,63 @@ void rasterize_splats_direct(
 
     // Phase 3: Parallel slice rasterization
     SliceBin *captured_bins = bins;
-    dispatch_apply(NUM_SLICES, queue, ^(size_t slice_idx) {
+    PARALLEL_FOR_BEGIN(NUM_SLICES, slice_idx)
         int slice_y0 = (int)slice_idx * slice_h;
         int slice_y1 = slice_y0 + slice_h - 1;
         if (slice_y1 >= height) slice_y1 = height - 1;
-        if (slice_y0 > slice_y1) return;
+        if (slice_y0 <= slice_y1) {
+            SliceBin *b = &captured_bins[slice_idx];
+            int num_items = b->count;
+            const int *idx_list = b->indices;
 
-        SliceBin *b = &captured_bins[slice_idx];
-        int num_items = b->count;
-        const int *idx_list = b->indices;
+            for (int k = 0; k < num_items; k++) {
+                int idx = idx_list[k];
+                int y_start = splats[idx].min_y;
+                int y_end = splats[idx].max_y;
+                if (y_start < slice_y0) y_start = slice_y0;
+                if (y_end > slice_y1) y_end = slice_y1;
+                if (y_start > y_end) continue;
 
-        for (int k = 0; k < num_items; k++) {
-            int idx = idx_list[k];
-            int y_start = splats[idx].min_y;
-            int y_end = splats[idx].max_y;
-            if (y_start < slice_y0) y_start = slice_y0;
-            if (y_end > slice_y1) y_end = slice_y1;
-            if (y_start > y_end) continue;
+                int min_x = splats[idx].min_x;
+                int max_x = splats[idx].max_x;
+                float p_x = splats[idx].px;
+                float p_y = splats[idx].py;
+                float A_conic = splats[idx].A;
+                float B_conic = splats[idx].B;
+                float C_conic = splats[idx].C;
+                float base_alpha = splats[idx].base_alpha;
+                uint8_t r_src = splats[idx].r;
+                uint8_t g_src = splats[idx].g;
+                uint8_t b_src = splats[idx].b;
 
-            int min_x = splats[idx].min_x;
-            int max_x = splats[idx].max_x;
-            float p_x = splats[idx].px;
-            float p_y = splats[idx].py;
-            float A_conic = splats[idx].A;
-            float B_conic = splats[idx].B;
-            float C_conic = splats[idx].C;
-            float base_alpha = splats[idx].base_alpha;
-            uint8_t r_src = splats[idx].r;
-            uint8_t g_src = splats[idx].g;
-            uint8_t b_src = splats[idx].b;
+                for (int y = y_start; y <= y_end; y++) {
+                    float dy = (float)y - p_y;
+                    float C_dy = C_conic * dy * dy;
+                    float two_B_dy = 2.0f * B_conic * dy;
+                    uint8_t *row = &buf[(y * width + min_x) * 4];
 
-            for (int y = y_start; y <= y_end; y++) {
-                float dy = (float)y - p_y;
-                float C_dy = C_conic * dy * dy;
-                float two_B_dy = 2.0f * B_conic * dy;
-                uint8_t *row = &buf[(y * width + min_x) * 4];
+                    for (int x = min_x; x <= max_x; x++, row += 4) {
+                        float dx = (float)x - p_x;
+                        float power = -0.5f * (A_conic * dx * dx + two_B_dy * dx + C_dy);
+                        if (power > 0.0f || power < -4.5f) continue;
 
-                for (int x = min_x; x <= max_x; x++, row += 4) {
-                    float dx = (float)x - p_x;
-                    float power = -0.5f * (A_conic * dx * dx + two_B_dy * dx + C_dy);
-                    if (power > 0.0f || power < -4.5f) continue;
+                        float alpha = base_alpha * fast_exp(power);
+                        if (alpha < 0.004f) continue;
 
-                    float alpha = base_alpha * fast_exp(power);
-                    if (alpha < 0.004f) continue;
+                        int a_int = (int)(alpha * 255.0f + 0.5f);
+                        if (a_int <= 0) continue;
+                        if (a_int > 255) a_int = 255;
+                        int inv_a = 255 - a_int;
 
-                    int a_int = (int)(alpha * 255.0f + 0.5f);
-                    if (a_int <= 0) continue;
-                    if (a_int > 255) a_int = 255;
-                    int inv_a = 255 - a_int;
-
-                    row[0] = (uint8_t)((b_src * a_int + row[0] * inv_a + 127) / 255);
-                    row[1] = (uint8_t)((g_src * a_int + row[1] * inv_a + 127) / 255);
-                    row[2] = (uint8_t)((r_src * a_int + row[2] * inv_a + 127) / 255);
-                    row[3] = (uint8_t)((255 * a_int + row[3] * inv_a + 127) / 255);
+                        row[0] = (uint8_t)((b_src * a_int + row[0] * inv_a + 127) / 255);
+                        row[1] = (uint8_t)((g_src * a_int + row[1] * inv_a + 127) / 255);
+                        row[2] = (uint8_t)((r_src * a_int + row[2] * inv_a + 127) / 255);
+                        row[3] = (uint8_t)((255 * a_int + row[3] * inv_a + 127) / 255);
+                    }
                 }
             }
         }
-    });
+    PARALLEL_FOR_END()
 
     for (int s = 0; s < NUM_SLICES; s++) {
         free(bins[s].indices);
@@ -604,9 +611,8 @@ void rasterize_point_cloud_auto(
 
     int chunk_size = 32768;
     int n_chunks = (n_points + chunk_size - 1) / chunk_size;
-    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0);
 
-    dispatch_apply(n_chunks, queue, ^(size_t chunk_idx) {
+    PARALLEL_FOR_BEGIN(n_chunks, chunk_idx)
         int start = (int)chunk_idx * chunk_size;
         int end = start + chunk_size;
         if (end > n_points) end = n_points;
@@ -671,9 +677,10 @@ void rasterize_point_cloud_auto(
             if (point_size <= 1) {
                 int idx = py * width + px;
                 uint32_t prev = __atomic_load_n(&depth_buf[idx], __ATOMIC_RELAXED);
-                if (z_int < prev) {
-                    if (__atomic_compare_exchange_n(&depth_buf[idx], &prev, z_int, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                while (z_int < prev) {
+                    if (__atomic_compare_exchange_n(&depth_buf[idx], &prev, z_int, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
                         cbuf32[idx] = pix32;
+                        break;
                     }
                 }
             } else {
@@ -691,9 +698,10 @@ void rasterize_point_cloud_auto(
                         if (dx * dx + dy_sq <= r_sq) {
                             int idx = row_offset + xp;
                             uint32_t prev = __atomic_load_n(&depth_buf[idx], __ATOMIC_RELAXED);
-                            if (z_int < prev) {
-                                if (__atomic_compare_exchange_n(&depth_buf[idx], &prev, z_int, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                            while (z_int < prev) {
+                                if (__atomic_compare_exchange_n(&depth_buf[idx], &prev, z_int, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
                                     cbuf32[idx] = pix32;
+                                    break;
                                 }
                             }
                         }
@@ -701,7 +709,7 @@ void rasterize_point_cloud_auto(
                 }
             }
         }
-    });
+    PARALLEL_FOR_END()
 
     free(depth_buf);
 }

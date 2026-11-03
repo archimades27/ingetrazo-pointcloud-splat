@@ -9,6 +9,7 @@ import logging
 import math
 from pathlib import Path
 import subprocess
+import sys
 import time
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -289,7 +290,7 @@ class CloudRenderer:
         d = float(-(nx * pt.x() + ny * pt.y() + nz * pt.z()))
         return np.array([nx, ny, nz, d], dtype=np.float32)
 
-    def get_view_hash(self, viewport, datasets) -> int:
+    def get_view_hash(self, viewport, datasets, w: Optional[int] = None, h: Optional[int] = None) -> int:
         """Hash camera, projection mode, section plane, and dataset display parameters."""
         cam = getattr(viewport, 'camera', None)
         if cam is None:
@@ -325,6 +326,9 @@ class CloudRenderer:
             (self.clip_min.tobytes(), self.clip_max.tobytes()) if self.clipping_enabled else None
         )
 
+        vw = w if w is not None else viewport.width()
+        vh = h if h is not None else viewport.height()
+
         return hash((
             round(getattr(cam, 'yaw', 0.0), 3),
             round(getattr(cam, 'pitch', 0.0), 3),
@@ -334,13 +338,13 @@ class CloudRenderer:
             clip_hash,
             clip_box,
             self.max_point_budget,
-            viewport.width(),
-            viewport.height(),
+            vw,
+            vh,
             tuple(ds_tokens)
         ))
 
-    def check_interaction(self, viewport) -> bool:
-        """True if the camera of this viewport is actively orbiting / panning / zooming."""
+    def check_interaction(self, viewport, visible_ds=()) -> bool:
+        """True if the camera or a dataset transform in this viewport is actively moving."""
         cam = getattr(viewport, 'camera', None)
         if cam is None:
             return False
@@ -353,13 +357,25 @@ class CloudRenderer:
         tz = getattr(target, 'z', lambda: 0.0)() if target else 0.0
         clip_p = self._get_section_clip_plane(viewport)
         clip_hash = tuple(np.round(clip_p, 3)) if clip_p is not None else None
+        xform_tokens = tuple(
+            (
+                id(ds),
+                ds.offset.tobytes() if hasattr(ds.offset, 'tobytes') else str(ds.offset),
+                round(float(getattr(ds, 'rotation_x_deg', 0.0)), 3),
+                round(float(getattr(ds, 'rotation_y_deg', 0.0)), 3),
+                round(float(getattr(ds, 'rotation_z_deg', 0.0)), 3),
+                round(float(getattr(ds, 'scale', 1.0)), 4),
+            )
+            for ds in visible_ds
+        )
         cam_tuple = (
             round(getattr(cam, 'yaw', 0.0), 3),
             round(getattr(cam, 'pitch', 0.0), 3),
             round(getattr(cam, 'distance', 0.0), 2),
             round(tx, 2), round(ty, 2), round(tz, 2),
             getattr(cam, 'perspective', True),
-            clip_hash
+            clip_hash,
+            xform_tokens,
         )
         cam_hash = hash(cam_tuple)
 
@@ -408,8 +424,17 @@ class CloudRenderer:
         if w <= 0 or h <= 0:
             return
 
-        is_moving = self.check_interaction(viewport)
-        view_hash = self.get_view_hash(viewport, visible_ds)
+        # Sync transforms from native scene proxy groups (including live Move/Rotate preview)
+        try:
+            from .scene_proxy import sync_dataset_from_proxy
+            for ds in visible_ds:
+                if getattr(ds, "proxy_group", None) is not None:
+                    sync_dataset_from_proxy(ds, viewport)
+        except Exception:
+            pass
+
+        is_moving = self.check_interaction(viewport, visible_ds)
+        view_hash = self.get_view_hash(viewport, visible_ds, w, h)
 
         # 1. Serve from stationary cache if available (0ms overhead on hover / CAD tools)
         if not is_moving and state.cached_qimg is not None and state.cached_cam_hash == view_hash:
@@ -524,7 +549,6 @@ class CloudRenderer:
             log.debug(f"Background refine camera extract error: {e}")
             return
 
-        clip_p_c = clip_p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if clip_p is not None else None
         clip_box = (self.clip_min.copy(), self.clip_max.copy()) if self.clipping_enabled else None
 
         # Snapshot datasets
@@ -532,7 +556,7 @@ class CloudRenderer:
         for ds in visible_ds:
             ds_type = type(ds).__name__
             if ds_type == "GaussianSplatDataset" or isinstance(ds, GaussianSplatDataset):
-                obj_mat = self._get_obj_matrix(ds)
+                obj_mat = self._get_obj_matrix(ds, viewport)
                 snapshots.append({
                     "type": "gs",
                     "coords": ds.coords,
@@ -545,7 +569,7 @@ class CloudRenderer:
                     "max_splats": min(getattr(ds, 'max_splats', 1500000), self.max_point_budget)
                 })
             elif ds_type == "PointCloudDataset" or isinstance(ds, PointCloudDataset):
-                obj_mat = self._get_obj_matrix(ds)
+                obj_mat = self._get_obj_matrix(ds, viewport)
                 # Pass references to worker thread so 162M slicing never blocks the GUI thread
                 snapshots.append({
                     "type": "pc",
@@ -568,6 +592,7 @@ class CloudRenderer:
                 return
 
             fast_lib = _get_fast_splat_lib()
+            clip_p_c = clip_p.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if clip_p is not None else None
             buf = np.zeros((h, w, 4), dtype=np.uint8)
 
             rendered_any = False
@@ -629,8 +654,24 @@ class CloudRenderer:
 
         self._bg_executor.submit(_bg_task)
 
-    def _get_obj_matrix(self, ds) -> np.ndarray:
+    def _get_obj_matrix(self, ds, viewport=None) -> np.ndarray:
         """Compute 3x4 object transform matrix."""
+        if getattr(ds, "proxy_group", None) is not None:
+            try:
+                from .scene_proxy import sync_dataset_from_proxy
+                R_base, T_off = sync_dataset_from_proxy(ds, viewport)
+                scale = float(getattr(ds, "scale", 1.0))
+                R_obj = R_base * scale
+                piv = ds.pivot if ds.pivot is not None else np.zeros(3, dtype=np.float32)
+                T = T_off + piv - (piv @ R_obj.T)
+                return np.array([
+                    R_obj[0, 0], R_obj[0, 1], R_obj[0, 2], T[0],
+                    R_obj[1, 0], R_obj[1, 1], R_obj[1, 2], T[1],
+                    R_obj[2, 0], R_obj[2, 1], R_obj[2, 2], T[2]
+                ], dtype=np.float32)
+            except Exception:
+                pass
+
         obj_mat = np.array([
             1.0, 0.0, 0.0, 0.0,
             0.0, 1.0, 0.0, 0.0,
@@ -795,38 +836,7 @@ class CloudRenderer:
                 W_flat = np.eye(3, dtype=np.float32).flatten()
 
         # Compute dataset object transform matrix (3x4)
-        obj_mat = np.array([
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0
-        ], dtype=np.float32)
-
-        rx = math.radians(ds.rotation_x_deg)
-        ry = math.radians(ds.rotation_y_deg)
-        rz = math.radians(ds.rotation_z_deg)
-        has_rot = (abs(rx) > 1e-4 or abs(ry) > 1e-4 or abs(rz) > 1e-4)
-        has_off = np.any(ds.offset != 0)
-        has_scale = (ds.scale != 1.0)
-
-        if has_rot or has_off or has_scale:
-            cx_r, sx_r = math.cos(rx), math.sin(rx)
-            cy_r, sy_r = math.cos(ry), math.sin(ry)
-            cz_r, sz_r = math.cos(rz), math.sin(rz)
-            R_obj = np.array([
-                [cz_r * cy_r, cz_r * sy_r * sx_r - sz_r * cx_r, cz_r * sy_r * cx_r + sz_r * sx_r],
-                [sz_r * cy_r, sz_r * sy_r * sx_r + cz_r * cx_r, sz_r * sy_r * cx_r - cz_r * sx_r],
-                [-sy_r, cy_r * sx_r, cy_r * cx_r]
-            ], dtype=np.float32) * float(ds.scale)
-
-            piv = ds.pivot if ds.pivot is not None else np.zeros(3, dtype=np.float32)
-            # T = offset + pivot - R * pivot
-            T = ds.offset + piv - (piv @ R_obj.T)
-
-            obj_mat = np.array([
-                R_obj[0, 0], R_obj[0, 1], R_obj[0, 2], T[0],
-                R_obj[1, 0], R_obj[1, 1], R_obj[1, 2], T[1],
-                R_obj[2, 0], R_obj[2, 1], R_obj[2, 2], T[2]
-            ], dtype=np.float32)
+        obj_mat = self._get_obj_matrix(ds, viewport)
 
         fast_lib = _get_fast_splat_lib()
         budget = 80000 if is_moving else min(getattr(ds, 'max_splats', 1500000), self.max_point_budget)
@@ -1113,7 +1123,7 @@ class CloudRenderer:
             log.debug(f"Camera extract error in _render_point_cloud: {e}")
             return False
 
-        obj_mat = self._get_obj_matrix(ds)
+        obj_mat = self._get_obj_matrix(ds, viewport)
 
         # Select points & colors based on movement state
         if is_moving or n_pts > self.max_point_budget:

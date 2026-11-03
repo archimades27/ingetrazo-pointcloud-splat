@@ -139,27 +139,25 @@ def create_bounding_box_group(
     scene,
     name: Optional[str] = None
 ) -> Group:
-    """Create a 3D bounding box wireframe/volume group in IngeTrazo."""
+    """Create a 3D bounding box wireframe group in IngeTrazo."""
     min_pt, max_pt = dataset.bounds
     x0, y0, z0 = float(min_pt[0]), float(min_pt[1]), float(min_pt[2])
     x1, y1, z1 = float(max_pt[0]), float(max_pt[1]), float(max_pt[2])
 
     m = Mesh()
-    # Bottom face
-    f_bottom = m.add_face([
+    corners = [
         QVector3D(x0, y0, z0), QVector3D(x1, y0, z0),
-        QVector3D(x1, y1, z0), QVector3D(x0, y1, z0)
-    ])
-    # Top face
-    f_top = m.add_face([
-        QVector3D(x0, y1, z1), QVector3D(x1, y1, z1),
-        QVector3D(x1, y0, z1), QVector3D(x0, y0, z1)
-    ])
-    # Sides
-    m.add_face([QVector3D(x0, y0, z0), QVector3D(x0, y0, z1), QVector3D(x1, y0, z1), QVector3D(x1, y0, z0)])
-    m.add_face([QVector3D(x1, y0, z0), QVector3D(x1, y0, z1), QVector3D(x1, y1, z1), QVector3D(x1, y1, z0)])
-    m.add_face([QVector3D(x1, y1, z0), QVector3D(x1, y1, z1), QVector3D(x0, y1, z1), QVector3D(x0, y1, z0)])
-    m.add_face([QVector3D(x0, y1, z0), QVector3D(x0, y1, z1), QVector3D(x0, y0, z1), QVector3D(x0, y0, z0)])
+        QVector3D(x1, y1, z0), QVector3D(x0, y1, z0),
+        QVector3D(x0, y0, z1), QVector3D(x1, y0, z1),
+        QVector3D(x1, y1, z1), QVector3D(x0, y1, z1),
+    ]
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+    for i, j in edges:
+        m.add_edge(corners[i], corners[j])
 
     grp_name = name or f"Bounds ({dataset.name})"
     grp = Group(m, name=grp_name)

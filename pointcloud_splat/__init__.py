@@ -97,6 +97,8 @@ def setup(app) -> None:
         snap_engine = CloudSnapEngine(app)
         app._cloud_renderer = renderer
         app._cloud_snap_engine = snap_engine
+        app.window._cloud_renderer = renderer
+        app.window._cloud_snap_engine = snap_engine
 
         # Hook viewport overlay for point clouds & splats
         def draw_cloud_overlay(vp, painter):
