@@ -1,7 +1,25 @@
-# What's New in v1.0.1
+# What's New in v1.0.2 & v1.0.1
 
-**Release Date:** November 3, 2026  
-**Compatible with:** IngeTrazo `0.5.7+`
+**Release Date:** November 5, 2026  
+**Compatible with:** IngeTrazo `0.5.7+` / `0.6.0+`
+
+---
+
+## 🚀 What's New in `v1.0.2`
+
+*(Contributed with review and patch from Marco Sumari Tellez / `@tuxiasumari`)*
+
+### 1. Platform-Specific Native C Library Detection & Linux OpenMP Multi-Threading (`pointcloud_splat/renderer.py`, `pointcloud_splat/fast_splat.c`)
+- **Fixed Native Library Loading Outside macOS**: Previously, `_get_fast_splat_lib()` checked `fast_splat.dylib` first on every OS. Because `fast_splat.dylib` is bundled in the archive, `dylib_path` matched on Linux and Windows, causing `ctypes.CDLL` to reject the Mach-O binary (`invalid ELF header`) and skipping automatic `gcc` compilation of `fast_splat.c`. Each platform (`darwin`, `win32`, `linux`) now checks only its native shared library extension (`.dylib`, `.dll`, `.so`), so Linux automatically compiles and loads `fast_splat.so`.
+- **OpenMP Multi-Threading on Linux/Windows**: Added `#elif defined(_OPENMP)` parallel loop directives (`_Pragma("omp parallel for schedule(dynamic, 1)")`) in `fast_splat.c` and `-fopenmp` compilation (with automatic single-thread fallback) in `renderer.py` so non-Apple builds parallelize splat and point cloud rasterization across CPU cores.
+
+### 2. NumPy 2 Compatibility & Vectorized Python Splat Fallback (`pointcloud_splat/renderer.py`)
+- **Fixed `OverflowError` Under NumPy 2**: The pure-Python Gaussian Splat fallback (`_render_splat_fallback`) previously performed arithmetic directly on `uint8` pixel slices, raising `OverflowError` under NumPy 2 whenever the native C library was unavailable (such as on Windows without a C compiler).
+- **Vectorized `int32` Patch Blending + `FALLBACK_MAX_SPLATS = 4000`**: Replaced the nested per-pixel Python loops with vectorized `np.ogrid` mask blending in `int32` and capped the fallback sample to `FALLBACK_MAX_SPLATS = 4000` evenly spaced depth-sorted splats so the viewport remains responsive and never freezes the GUI thread.
+
+### 3. Undoable Point Cloud Import/Removal & `.igz` Document Sync (`pointcloud_splat/ui/manager_panel.py`, `pointcloud_splat/scene_proxy.py`, `pointcloud_splat/__init__.py`)
+- **Undo/Redo Support for Importing & Removing Scans**: `add_dataset()`, `_remove_active_dataset()`, and `clear_all()` now execute proxy group creation and removal through IngeTrazo's `SnapshotImport` command layer, and `app.on_document_changed` (`sync_with_scene`) reconciles `panel.datasets` with `scene.groups` so pressing `Ctrl+Z` / `Ctrl+Y` cleanly undoes and redoes point cloud imports and deletions.
+- **Clean `.igz` Reopen Handling**: Proxy groups now store `filepath` in `group.ext`. When reopening a `.igz` file in a fresh session, `sync_with_scene()` automatically reloads the linked scan from disk if present (preserving its saved transform) or removes orphan proxy groups that have no backing points.
 
 ---
 

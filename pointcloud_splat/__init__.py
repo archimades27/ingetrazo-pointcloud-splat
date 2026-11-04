@@ -37,7 +37,7 @@ from .scene_proxy import is_pointcloud_proxy
 from .snap_engine import CloudSnapEngine
 from .ui.manager_panel import PointCloudManagerPanel, PointCloudDialog
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 log = logging.getLogger("ingetrazo.plugins.pointcloud_splat")
 
@@ -335,7 +335,7 @@ def setup(app) -> None:
             tip=tr("Import and manage point clouds and 3D Gaussian Splats.")
         )
 
-        # Register Outliner / Browser kind metadata per IngeTrazo Extension API 2
+        # Register Outliner / Browser kind metadata and document sync per IngeTrazo Extension API 2
         if hasattr(app, "add_outliner_kind"):
             try:
                 app.add_outliner_kind(
@@ -346,6 +346,12 @@ def setup(app) -> None:
                     if is_pointcloud_proxy(group)
                     else None
                 )
+            except Exception:
+                pass
+
+        if hasattr(app, "on_document_changed"):
+            try:
+                app.on_document_changed(panel.sync_with_scene)
             except Exception:
                 pass
 

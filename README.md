@@ -2,7 +2,7 @@
 
 [![IngeTrazo](https://img.shields.io/badge/IngeTrazo-v0.5.7+-007ACC.svg)](https://ingetrazo.com)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/Version-1.0.1-orange.svg)](https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/tag/v1.0.1)
+[![Version](https://img.shields.io/badge/Version-1.0.2-orange.svg)](https://github.com/archimades27/ingetrazo-pointcloud-splat/releases/tag/v1.0.2)
 [![YouTube Preview](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000.svg?logo=youtube&logoColor=white)](https://youtu.be/XS2TN14EPjI)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-yellow.svg)]()
 [![Platform: macOS | Linux | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
@@ -23,13 +23,14 @@ The **Point Cloud & 3D Gaussian Splatting** extension brings native, interactive
 
 ---
 
-## 🆕 What's New in v1.0.1
+## 🆕 What's New in v1.0.2 & v1.0.1
 
 See [WHATSNEW.md](WHATSNEW.md) for the complete technical changelog. Highlights include:
-* **True 3D Depth Buffer Occlusion & Overlap**: Point clouds and 3D Gaussian Splats now test against IngeTrazo's OpenGL depth buffer (`_depth_snap`) with float64 polygon-offset compensation so CAD geometry and large-scale drone scans (100m+) overlap and intersect accurately in 3D space.
-* **Unobstructed CAD Selection & Editing Inside Scans**: Replaced the 6-face proxy box with a non-blocking 0-face proxy and updated viewport picking hooks (`pick_group`, `entity_visible`, `entity_selectable`, `begin_group_edit`) so loose faces, edges, Push/Pull, Move, and crossing-box selection work seamlessly inside both visible and hidden point clouds.
-* **Clean Visibility & Selection Sync**: Hiding a point cloud now immediately hides and deselects its scene proxy and flushes viewport pick caches.
-* **Undoable Scan-to-BIM & Native Scale Sync**: Wrapped Scan-to-BIM actions in IngeTrazo's `SnapshotImport` undo/redo layer (`docs/plugins.md`), added native Scale (`S`) tool recovery, cached world bounds, multi-viewport buffer resize safety, and cross-platform C kernel (`fast_splat.c`) support.
+* **Linux Native Library Auto-Build & OpenMP Multi-Threading (`v1.0.2`)**: Fixed platform library detection in `_get_fast_splat_lib()` so Linux systems no longer stop at `fast_splat.dylib` and instead compile and load `fast_splat.so` with `-fopenmp` multi-threading.
+* **NumPy 2 Splat Fallback Fix & Frame Cap (`v1.0.2`)**: Vectorized `_render_splat_fallback` using `np.ogrid` and `int32` blending (fixing `OverflowError` under NumPy 2 when running without a C compiler) and capped fallback rendering to `FALLBACK_MAX_SPLATS = 4000` so the GUI never freezes.
+* **Undoable Point Cloud Import & Clean `.igz` Reopen (`v1.0.2`)**: Importing and removing point clouds now records an undo step (`Ctrl+Z` / `Ctrl+Y`) and automatically reloads or cleans up proxy groups when reopening saved `.igz` files.
+* **True 3D Depth Buffer Occlusion & Overlap (`v1.0.1`)**: Point clouds and 3D Gaussian Splats test against IngeTrazo's OpenGL depth buffer (`_depth_snap`) with float64 polygon-offset compensation so CAD geometry and large-scale drone scans (100m+) overlap and intersect accurately in 3D space.
+* **Unobstructed CAD Selection & Editing Inside Scans (`v1.0.1`)**: Replaced the 6-face proxy box with a non-blocking 0-face proxy and updated viewport picking hooks (`pick_group`, `entity_visible`, `entity_selectable`, `begin_group_edit`) so loose faces, edges, Push/Pull, Move, and crossing-box selection work seamlessly inside both visible and hidden point clouds.
 
 ---
 

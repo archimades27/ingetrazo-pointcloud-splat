@@ -100,7 +100,12 @@ def create_pointcloud_proxy(dataset, scene) -> Group:
     grp = Group(m, name=target_name)
     # Fully transparent faces
     grp.material = {"color": (0.2, 0.6, 0.9), "opacity": 0.0}
-    grp.ext = {"type": "pointcloud_proxy", "dataset_name": dataset.name}
+    fp = getattr(dataset, "filepath", None)
+    grp.ext = {
+        "type": "pointcloud_proxy",
+        "dataset_name": dataset.name,
+        "filepath": str(fp) if fp else "",
+    }
     grp.hidden = not bool(getattr(dataset, "visible", True))
 
     dataset.proxy_group = grp

@@ -23,6 +23,9 @@ log = logging.getLogger("ingetrazo.plugins.pointcloud_splat")
 
 _fast_splat_lib = None
 
+#: Most splats the pure-Python fallback draws in one frame.
+FALLBACK_MAX_SPLATS = 4000
+
 
 class RefineBridge(QObject):
     """Thread bridge to safely deliver refined QImages back to the Qt main GUI thread."""
@@ -38,12 +41,15 @@ def _get_fast_splat_lib():
     plugin_dir = Path(__file__).resolve().parent
 
     # Check standard or versioned shared library
-    candidates = [
-        plugin_dir / "fast_splat.dylib",
-        plugin_dir / "fast_splat_v9.dylib",
-        plugin_dir / "fast_splat.so",
-        plugin_dir / "fast_splat.dll",
-    ]
+    # Only this system's library: a macOS .dylib cannot load elsewhere, and
+    # finding it here used to stop the build from fast_splat.c below.
+    if sys.platform == "darwin":
+        candidates = [plugin_dir / "fast_splat.dylib",
+                      plugin_dir / "fast_splat_v9.dylib"]
+    elif sys.platform == "win32":
+        candidates = [plugin_dir / "fast_splat.dll"]
+    else:
+        candidates = [plugin_dir / "fast_splat.so"]
     dylib_path = None
     for c in candidates:
         if c.exists():
@@ -53,18 +59,21 @@ def _get_fast_splat_lib():
     c_path = plugin_dir / "fast_splat.c"
 
     if dylib_path is None and c_path.exists():
-        ext = ".dylib" if sys.platform == "darwin" else ".so"
+        ext = ".dylib" if sys.platform == "darwin" else (".dll" if sys.platform == "win32" else ".so")
         target = plugin_dir / f"fast_splat{ext}"
-        try:
-            log.info(f"Compiling native fast_splat{ext} with clang/gcc...")
-            compiler = "clang" if sys.platform == "darwin" else "gcc"
-            subprocess.run([
-                compiler, "-O3", "-shared", "-fPIC", "-march=native", "-ffast-math",
-                "-o", str(target), str(c_path)
-            ], check=True, capture_output=True)
-            dylib_path = target
-        except Exception as e:
-            log.warning(f"Could not auto-compile fast_splat: {e}")
+        compiler = "clang" if sys.platform == "darwin" else "gcc"
+        base_flags = [compiler, "-O3", "-shared", "-fPIC", "-march=native", "-ffast-math"]
+        build_cmds = [base_flags + ["-o", str(target), str(c_path)]]
+        if sys.platform != "darwin":
+            build_cmds.insert(0, base_flags + ["-fopenmp", "-o", str(target), str(c_path)])
+        for cmd in build_cmds:
+            try:
+                log.info(f"Compiling native fast_splat{ext} with {' '.join(cmd)}...")
+                subprocess.run(cmd, check=True, capture_output=True)
+                dylib_path = target
+                break
+            except Exception as e:
+                log.warning(f"Could not auto-compile fast_splat ({cmd[0]}): {e}")
 
     if dylib_path is not None and dylib_path.exists():
         try:
@@ -1013,9 +1022,10 @@ class CloudRenderer:
         scene_depth: Optional[np.ndarray] = None
     ) -> bool:
         """High-speed Python fallback with perspective scaling and alpha blending."""
-        # Cap fallback to 100k splats for responsiveness
-        if len(order) > 100000:
-            order = order[::(len(order) // 80000)]
+        # This runs inside the paint event: keep it short. An even sample of
+        # the sorted order keeps the back-to-front blending and the coverage.
+        if len(order) > FALLBACK_MAX_SPLATS:
+            order = order[::len(order) // FALLBACK_MAX_SPLATS + 1]
 
         pts = ds.coords[order]
         cam_pts = (pts - eye_v) @ W.T
@@ -1061,25 +1071,24 @@ class CloudRenderer:
             r_sq = (r + 0.5) ** 2
             inv_r_sq = 2.0 / max(1.0, r_sq)
 
-            for y in range(y0, y1 + 1):
-                dy = y - y_c
-                dy_sq = dy * dy
-                for x in range(x0, x1 + 1):
-                    if scene_depth is not None and splat_z > scene_depth[y, x]:
-                        continue
-                    dx = x - x_c
-                    d_sq = dx * dx + dy_sq
-                    if d_sq <= r_sq:
-                        alpha = base_alpha * math.exp(-d_sq * inv_r_sq)
-                        if alpha < 0.01:
-                            continue
-                        a_int = int(alpha * 255.0 + 0.5)
-                        inv_a = 255 - a_int
-                        pix = buf[y, x]
-                        pix[0] = (b_src * a_int + pix[0] * inv_a + 127) // 255
-                        pix[1] = (g_src * a_int + pix[1] * inv_a + 127) // 255
-                        pix[2] = (r_src * a_int + pix[2] * inv_a + 127) // 255
-                        pix[3] = (255 * a_int + pix[3] * inv_a + 127) // 255
+            yy, xx = np.ogrid[y0 - y_c:y1 - y_c + 1, x0 - x_c:x1 - x_c + 1]
+            d_sq = xx * xx + yy * yy
+            alpha = base_alpha * np.exp(-d_sq * inv_r_sq)
+            mask = (d_sq <= r_sq) & (alpha >= 0.01)
+            if scene_depth is not None:
+                mask &= scene_depth[y0:y1 + 1, x0:x1 + 1] >= splat_z
+            if not mask.any():
+                continue
+            a_int = (alpha[mask] * 255.0 + 0.5).astype(np.int32)
+            inv_a = 255 - a_int
+            region = buf[y0:y1 + 1, x0:x1 + 1]
+            # int32: under NumPy 2, uint8 arithmetic would overflow here.
+            pix = region[mask].astype(np.int32)
+            pix[:, 0] = (int(b_src) * a_int + pix[:, 0] * inv_a + 127) // 255
+            pix[:, 1] = (int(g_src) * a_int + pix[:, 1] * inv_a + 127) // 255
+            pix[:, 2] = (int(r_src) * a_int + pix[:, 2] * inv_a + 127) // 255
+            pix[:, 3] = (255 * a_int + pix[:, 3] * inv_a + 127) // 255
+            region[mask] = pix
 
         return True
 

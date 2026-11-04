@@ -58,6 +58,7 @@ from ..cad_tools import (
 )
 from ..scene_proxy import (
     create_pointcloud_proxy,
+    is_pointcloud_proxy,
     remove_pointcloud_proxy,
     sync_dataset_from_proxy,
     sync_proxy_from_dataset,
@@ -124,6 +125,8 @@ class PointCloudManagerPanel(QWidget):
         self.setObjectName("pcPanel")
         self.app = app
         self.datasets: List[Union[PointCloudDataset, GaussianSplatDataset]] = []
+        self._dataset_pool: List[Union[PointCloudDataset, GaussianSplatDataset]] = []
+        self._syncing_scene: bool = False
         self._active_idx: int = -1
         self._icon_targets: list = []        # (widget/action, icon name) for theme refresh
         self._dataset_widgets: list = []     # controls enabled only with an active dataset
@@ -748,15 +751,22 @@ class PointCloudManagerPanel(QWidget):
                 log.info(f"Auto-scaled {ds.name} from mm to m (scale 0.001)")
 
         self._apply_budget()
+        if ds not in self._dataset_pool:
+            self._dataset_pool.append(ds)
         self.datasets.append(ds)
 
-        # Create native scene proxy for click selection and Move/Rotate tools
+        # Create native scene proxy via SnapshotImport so Ctrl+Z undoes the import
+        self._syncing_scene = True
         try:
-            create_pointcloud_proxy(ds, self.app.scene)
+            def mutate(scene):
+                create_pointcloud_proxy(ds, scene)
+            self._execute_scene_mutation(mutate)
             if getattr(ds, "proxy_group", None) is not None:
                 self.app.scene.select([ds.proxy_group])
         except Exception as e:
             log.warning(f"Failed to create scene proxy: {e}")
+        finally:
+            self._syncing_scene = False
 
         self._active_idx = len(self.datasets) - 1
         self._refresh_table()
@@ -781,11 +791,19 @@ class PointCloudManagerPanel(QWidget):
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
         ) != QMessageBox.Yes:
             return
-        for ds in self.datasets:
-            try:
-                remove_pointcloud_proxy(ds, self.app.scene)
-            except Exception:
-                pass
+        to_remove = list(self.datasets)
+        self._syncing_scene = True
+        try:
+            def mutate(scene):
+                for ds in to_remove:
+                    grp = getattr(ds, "proxy_group", None)
+                    if grp is not None and grp in scene.groups:
+                        scene.groups.remove(grp)
+                    if grp is not None and grp in getattr(scene, "selection", ()):
+                        scene.selection.discard(grp)
+            self._execute_scene_mutation(mutate)
+        finally:
+            self._syncing_scene = False
         self.datasets.clear()
         self._active_idx = -1
         self._refresh_table()
@@ -799,10 +817,17 @@ class PointCloudManagerPanel(QWidget):
         idx = self._active_idx
         ds = self.datasets[idx]
         name = ds.name
+        self._syncing_scene = True
         try:
-            remove_pointcloud_proxy(ds, self.app.scene)
-        except Exception:
-            pass
+            def mutate(scene):
+                grp = getattr(ds, "proxy_group", None)
+                if grp is not None and grp in scene.groups:
+                    scene.groups.remove(grp)
+                if grp is not None and grp in getattr(scene, "selection", ()):
+                    scene.selection.discard(grp)
+            self._execute_scene_mutation(mutate)
+        finally:
+            self._syncing_scene = False
         del self.datasets[idx]
         self._active_idx = min(idx, len(self.datasets) - 1)
         self._refresh_table()
@@ -811,6 +836,79 @@ class PointCloudManagerPanel(QWidget):
         self._sync_ui_state()
         self.app.viewport.update()
         self._set_status(tr("Removed {name}", name=name))
+
+    def sync_with_scene(self) -> None:
+        """Reconcile active datasets with scene.groups on Undo/Redo, New, or Open (.igz)."""
+        if self._syncing_scene:
+            return
+        scene = getattr(self.app, "scene", None)
+        if scene is None:
+            return
+        self._syncing_scene = True
+        try:
+            scene_groups = list(getattr(scene, "groups", ()))
+            proxy_to_ds = {
+                getattr(ds, "proxy_group", None): ds
+                for ds in self._dataset_pool
+                if getattr(ds, "proxy_group", None) is not None
+            }
+            new_datasets: List[Union[PointCloudDataset, GaussianSplatDataset]] = []
+            orphan_groups = []
+            for grp in scene_groups:
+                if not is_pointcloud_proxy(grp):
+                    continue
+                ds = proxy_to_ds.get(grp)
+                if ds is not None:
+                    sync_dataset_from_proxy(ds, getattr(self.app, "viewport", None))
+                    new_datasets.append(ds)
+                else:
+                    # Orphan proxy group from a reopened .igz file: reload from filepath if available
+                    ext = getattr(grp, "ext", None) or {}
+                    fp = ext.get("filepath", "")
+                    loaded_ds = None
+                    if fp and Path(fp).is_file():
+                        try:
+                            p = Path(fp)
+                            suf = p.suffix.lower()
+                            if suf == ".splat":
+                                loaded_ds = read_splat(p)
+                            elif suf == ".ply":
+                                loaded_ds = read_ply(p)
+                            elif suf in (".xyz", ".pts", ".txt", ".csv"):
+                                loaded_ds = read_xyz(p)
+                            elif suf in (".las", ".laz"):
+                                loaded_ds = read_las(p)
+                        except Exception:
+                            loaded_ds = None
+                    if loaded_ds is not None:
+                        loaded_ds.proxy_group = grp
+                        sync_dataset_from_proxy(loaded_ds, getattr(self.app, "viewport", None))
+                        self._dataset_pool.append(loaded_ds)
+                        new_datasets.append(loaded_ds)
+                    else:
+                        orphan_groups.append(grp)
+
+            # Remove orphan proxy groups that have no backing point cloud data
+            for grp in orphan_groups:
+                try:
+                    scene.groups.remove(grp)
+                    if grp in getattr(scene, "selection", ()):
+                        scene.selection.discard(grp)
+                except Exception:
+                    pass
+
+            if new_datasets != self.datasets:
+                self.datasets = new_datasets
+                self._active_idx = min(self._active_idx, len(self.datasets) - 1)
+                if self._active_idx < 0 and self.datasets:
+                    self._active_idx = 0
+                self._refresh_table()
+                self._sync_ui_state()
+                vp = getattr(self.app, "viewport", None)
+                if vp is not None:
+                    vp.update()
+        finally:
+            self._syncing_scene = False
 
     def _refresh_table(self) -> None:
         if not hasattr(self, "tree"):

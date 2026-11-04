@@ -8,6 +8,11 @@
 #define PARALLEL_FOR_BEGIN(n_items, idx_var) \
     dispatch_apply((size_t)(n_items), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(size_t idx_var) {
 #define PARALLEL_FOR_END() });
+#elif defined(_OPENMP)
+#define PARALLEL_FOR_BEGIN(n_items, idx_var) \
+    _Pragma("omp parallel for schedule(dynamic, 1)") \
+    for (size_t idx_var = 0; idx_var < (size_t)(n_items); idx_var++) {
+#define PARALLEL_FOR_END() }
 #else
 #define PARALLEL_FOR_BEGIN(n_items, idx_var) \
     for (size_t idx_var = 0; idx_var < (size_t)(n_items); idx_var++) {
